@@ -28,7 +28,7 @@ EMDCA fixes this structurally:
 1.  **Construction:** Use Value Objects & Pure Factories. Parse, don't validate. ([Pattern 01](spec/patterns/01-factory-construction.md))
 2.  **State:** Use Sum Types (Discriminated Unions). Make invalid states unrepresentable. ([Pattern 02](spec/patterns/02-state-sum-types.md))
 3.  **Control Flow:** Use Railway Oriented Programming. No Exceptions for logic. ([Pattern 03](spec/patterns/03-railway-control-flow.md))
-4.  **Execution:** Return Intents as Data. The Core decides; the Shell executes. ([Pattern 04](spec/patterns/04-execution-intent.md))
+4.  **Execution:** Return Intents as Contracts. Complete specification of side effects and outcomes. ([Pattern 04](spec/patterns/04-execution-intent.md))
 5.  **Configuration:** Treat EnvVars as Foreign Reality. Translate to pure AppConfig. ([Pattern 05](spec/patterns/05-config-injection.md))
 6.  **Storage:** Treat DB as Foreign Reality. Translate to pure Domain Objects. ([Pattern 06](spec/patterns/06-repository-abstraction.md))
 7.  **Translation:** Use Foreign Models. Declarative mapping of External Reality to Internal Truth. ([Pattern 07](spec/patterns/07-acl-translation.md))
