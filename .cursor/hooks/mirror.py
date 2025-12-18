@@ -234,6 +234,7 @@ class HookInput(BaseModel):
     """
 
     file_path: Path | None = None
+    status: str | None = None  # "completed" | "aborted" | "error"
 
 
 # --- 2. Pure Logic Pipeline ---
@@ -333,6 +334,12 @@ def main() -> None:
 
     # 3. Scope: Batch vs Real-time
     # Determine the scope of analysis based on the input trigger.
+
+    # Safety Valve: If the user aborted the Agent, do not trigger a loop.
+    if input_data.status == "aborted":
+        print(json.dumps({}))
+        return
+
     target_globs = config.settings.target_globs
     sources: Iterator[SourceFile]
 
@@ -371,8 +378,16 @@ def main() -> None:
 
     # 5. Output
     # Emit the report if violations are found.
+    # We use agent_message to inject context into the Agent's loop without forcing a restart.
     if report := format_report(top_violations, limit):
-        print(json.dumps({"followup_message": report}))
+        print(
+            json.dumps(
+                {
+                    "agent_message": report,
+                    "user_message": "Architect's Mirror: Violations Detected (See Agent Context)",
+                }
+            )
+        )
     else:
         print(json.dumps({}))
 
