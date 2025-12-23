@@ -1,201 +1,283 @@
 # Pattern 04: Execution (Intent as Contract)
 
 ## The Principle
-Deciding to do something and doing it are separate concerns. The "Core" decides; the "Shell" executes.
+Deciding to do something, doing it, and interpreting the result are three separate concerns. The Domain decides and specifies interpretation. Infrastructure captures raw reality. The Shell composes models—never catching exceptions.
 
 ## The Mechanism
-The domain model returns inert, serializable **Specification Objects (Intents)** describing side effects AND their outcome interpretation. These intents contain all parameters required for execution and outcome mapping. The Shell executes these intents using a generic executor without needing to query the Context or make interpretation decisions.
+1. **The Domain** returns inert, serializable **Intents** specifying what to do AND how to interpret outcomes
+2. **Infrastructure** captures raw results as **Sum Types** (success or failure variants)—no exceptions escape
+3. **Foreign Models** translate raw infrastructure data through a `.to_foreign().to_domain()` chain
+4. **The Shell** composes these models: Intent + RawResult → DomainOutcome
+
+The Domain never sees exceptions. It only sees data.
 
 ---
 
-## 1. The Hidden Side Effect (Anti-Pattern)
-Mixing decision-making with execution makes the system impossible to test without mocking.
+## ❌ Anti-Pattern: Mixed Concerns
 
-### ❌ Anti-Pattern: Mixed Concerns
+Decision-making mixed with execution makes the system impossible to test without mocking.
+
 ```python
 def process_signup(user: User):
     if user.is_vip:
-        # ❌ Side Effect!
-        # Requires mocking SMTP server just to test the logic.
-        smtp_client.send(
-            to=user.email, 
-            subject="Welcome VIP",
-            body="..."
-        )
+        smtp_client.send(to=user.email, subject="Welcome VIP", body="...")  # ❌ Side effect!
 ```
 
 ---
 
-## 2. Intent as Contract (Complete Specification)
+## Supporting Types
 
-Instead of *calling* the function, we return a *complete specification* of the call—including how to interpret outcomes.
+These types form the outcome chain. Showing shape, not exhaustive fields.
 
-### ✅ Pattern: The Self-Interpreting Intent
 ```python
-from typing import Literal, Any
-from pydantic import BaseModel
+# Failures are explicit domain types (Smart Enum)
+class SmtpFailure(StrEnum):
+    CONNECTION_FAILED = "connection_failed"
+    TIMEOUT = "timeout"
+    RECIPIENT_REJECTED = "recipient_rejected"
+    # ...
 
-class SendEmailIntent(BaseModel):
-    """
-    A Complete Specification.
-    
-    The Intent carries:
-    1. Execution parameters (to, subject, body)
-    2. Exception classification (what errors are "expected")
-    3. Outcome mapping (how to interpret success/failure)
-    """
+# Client-level outcomes (Sum Type)
+class SmtpClientSuccess(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["send_email"] = "send_email"
-    
-    # Execution Parameters
-    to: str
-    subject: str
-    body: str
-    
-    # Exception Classification (Domain decides what's "expected failure" vs "panic")
-    catch_exceptions: tuple[str, ...] = ("SmtpConnectionError", "RecipientRejectedError")
-    
-    # Outcome Mapping (Domain logic—lives on the Intent, not in Shell)
-    def on_success(self, message_id: str) -> "EmailSent":
-        """Receives primitives extracted by Shell, not raw infrastructure response."""
-        return EmailSent(
-            message_id=message_id,
-            recipient=self.to,
-        )
-    
-    def on_failure(self, error: str) -> "EmailFailed":
-        return EmailFailed(
-            recipient=self.to,
-            error=error,
-        )
-
-# Result Types (The Intent's vocabulary)
-class EmailSent(BaseModel):
-    kind: Literal["sent"] = "sent"
+    kind: Literal["client_success"]
     message_id: str
-    recipient: str
+
+class SmtpClientError(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["client_error"]
+    failure: SmtpFailure
+    detail: SmtpErrorDetail  # SmtpErrorWithCode | SmtpErrorNoCode
+
+type SmtpClientOutcome = SmtpClientSuccess | SmtpClientError
+
+# Infrastructure outcomes (what Intent interprets)
+class SmtpSent(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["smtp_sent"]
+    message_id: str
+
+class SmtpFailed(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["smtp_failed"]
+    failure: SmtpFailure
+
+# Executor-level outcomes (final result)
+class EmailSent(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["email_sent"]
+    message_id: str
+    recipient: EmailStr
 
 class EmailFailed(BaseModel):
-    kind: Literal["failed"] = "failed"
-    recipient: str
-    error: str
+    model_config = {"frozen": True}
+    kind: Literal["email_failed"]
+    recipient: EmailStr
+    failure: SmtpFailure
 
-type SendEmailResult = EmailSent | EmailFailed
+class EmailUnhandled(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["email_unhandled"]
+    recipient: EmailStr
+    failure: SmtpFailure
+
+type EmailResult = EmailSent | EmailFailed | EmailUnhandled
+```
+
+---
+
+## ✅ Pattern: The Self-Interpreting Intent
+
+The Intent carries execution parameters AND outcome interpretation. The Domain decides what failures it handles gracefully.
+
+```python
+class SendEmailIntent(BaseModel):
+    """Complete specification: what to do AND how to interpret results."""
+    model_config = {"frozen": True}
+    kind: Literal["send_email"]
+    
+    to: EmailStr
+    subject: str
+    body: str
+    handled_failures: tuple[SmtpFailure, ...]  # NO DEFAULT—explicit
+    
+    def on_sent(self, outcome: SmtpSent) -> EmailSent:
+        return EmailSent(kind="email_sent", message_id=outcome.message_id, recipient=self.to)
+    
+    def on_failed(self, outcome: SmtpFailed) -> EmailFailed:
+        return EmailFailed(kind="email_failed", recipient=self.to, failure=outcome.failure)
+    
+    def is_handled(self, failure: SmtpFailure) -> bool:
+        return failure in self.handled_failures
+
 
 class NoOp(BaseModel):
-    """Domain decided no action is needed."""
+    """Domain decided no action needed."""
     model_config = {"frozen": True}
-    kind: Literal["no_op"] = "no_op"
-    reason: str | None = None
+    kind: Literal["no_op"]
+    reason: str  # NO DEFAULT—must be explicit
 
-# The Intent Union
-# Note: NoOp is NOT an Intent (not executable), it's a decision outcome.
-type DecisionOutcome = SendEmailIntent | NoOp
+
+type SignupDecision = SendEmailIntent | NoOp
 ```
 
-### 💡 Why Methods on the Intent?
+The Aggregate returns the Intent:
 
-The same principle as Pattern 07 (Foreign Reality → Internal Truth), but inverted:
-
-| Direction | Owner | Method |
-|-----------|-------|--------|
-| **Inbound** (API → Domain) | Foreign Model | `.to_domain()` |
-| **Outbound** (Execution → Result) | Intent | `.on_success()` / `.on_failure()` |
-
-The Intent knows what success means for THIS operation. The Shell doesn't.
-
----
-
-## 3. The Pure Decision
-The domain logic becomes a pure function that maps `Input -> Intent`.
-
-### ✅ Pattern: Deciding the Intent
 ```python
-def decide_signup_action(user: User) -> DecisionOutcome:
-    # Pure Logic: No mocking required.
-    # We just assert that the returned object matches our expectation.
+class User(BaseModel):
+    model_config = {"frozen": True}
+    id: str
+    email: EmailStr
+    is_vip: bool
     
-    if user.is_vip:
-        return SendEmailIntent(
-            to=user.email,
-            subject="Welcome VIP",
-            body="Here is your gold status..."
-        )
-        
-    return NoOp()
-```
-
----
-
-## 4. The Generic Executor (The Dumb Interpreter)
-
-The Shell provides ONE generic function that can execute ANY Intent. It reads the specification and applies it—nothing more.
-
-### ✅ Pattern: The Spec Executor
-```python
-from typing import Any, Awaitable, Callable
-
-# Exception registry maps string names → actual exception classes
-# (Strings in Intent keep it serializable; registry lives in Shell)
-EXCEPTION_REGISTRY: dict[str, type[Exception]] = {
-    "SmtpConnectionError": SmtpConnectionError,
-    "RecipientRejectedError": RecipientRejectedError,
-    # ... infrastructure exceptions ...
-}
-
-async def execute[TSuccess, TFailure](
-    operation: Callable[[], Awaitable[Any]],
-    catch_names: tuple[str, ...],
-    on_success: Callable[[Any], TSuccess],
-    on_failure: Callable[[str], TFailure],
-) -> TSuccess | TFailure:
-    """
-    The Generic Executor.
-    
-    Zero business logic. Reads the spec. Applies it.
-    Works for ANY Intent without modification.
-    """
-    catch_types = tuple(EXCEPTION_REGISTRY[name] for name in catch_names)
-    
-    try:
-        result = await operation()
-        return on_success(result)
-    except catch_types as e:
-        return on_failure(str(e))
-```
-
-### ✅ Pattern: The Interpreter Loop (Dispatcher)
-```python
-async def handle_request(user: User):
-    # 1. Decide (Pure)
-    outcome = decide_signup_action(user)
-    
-    # 2. Dispatch (Shell)
-    match outcome:
-        case NoOp():
-            # Explicitly do nothing. No executor needed.
-            pass
-
-        case SendEmailIntent() as intent:
-            # Intents go to the Executor via the Adapter
-            # The Adapter just provides the 'operation' lambda
-            await execute(
-                operation=lambda: smtp_client.send(...),
-                catch_names=intent.catch_exceptions,
-                # Shell extracts primitives from infrastructure response
-                on_success=lambda result: intent.on_success(message_id=result.message_id),
-                on_failure=intent.on_failure,
+    def decide_signup_action(self) -> SignupDecision:
+        if self.is_vip:
+            return SendEmailIntent(
+                kind="send_email",
+                to=self.email,
+                subject="Welcome VIP",
+                body="...",
+                handled_failures=(SmtpFailure.CONNECTION_FAILED, SmtpFailure.TIMEOUT),
             )
+        return NoOp(kind="no_op", reason="Non-VIP user")
 ```
 
-### 💡 The Test: Can You Add a New Intent Without Shell Changes?
+---
 
-If adding `SendSmsIntent` requires writing new exception handling or result construction in the Shell, the pattern is broken. The generic executor should handle it automatically.
+## ✅ Pattern: Infrastructure as Sum Type
 
-## 5. Cognitive Checks
-*   [ ] **Serializable:** Is the Intent just data? (No functions stored—methods are fine, closures are not).
-*   [ ] **Complete Specification:** Does the Intent define `on_success()`, `on_failure()`, and `catch_exceptions`?
-*   [ ] **Generic Executor:** Can the Shell execute this Intent using the same generic `execute()` function as all other Intents?
-*   [ ] **Primitive Parameters:** Do `on_success`/`on_failure` receive only primitives (str, int, bool), never `Any` or foreign objects?
-*   [ ] **Delegated Construction:** Does the Shell delegate Result construction to the Intent's `on_success` / `on_failure` methods?
-*   [ ] **Testable Mapping:** Can I test `intent.on_success(mock_result)` as a pure function without infrastructure?
+Raw infrastructure results are captured as data—never as exceptions. Each outcome variant is explicit.
+
+```python
+class RawSmtpSuccess(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["raw_success"]
+    message_id: str
+
+class RawSmtpConnectError(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["connect_error"]
+    message: str
+
+# ... other failure variants: timeout, recipients_refused, response_error, unknown
+
+type RawSmtpResult = RawSmtpSuccess | RawSmtpConnectError | ...  # Sum Type
+```
+
+---
+
+## ✅ Pattern: Foreign Model Translation
+
+Foreign Models mirror external reality and own the translation to domain types. The chain is: `Raw → Foreign → Domain`.
+
+```python
+class SmtpConnectErrorForeign(BaseModel):
+    """Mirrors what smtplib.SMTPConnectError contains."""
+    model_config = {"frozen": True}
+    message: str
+    
+    def to_domain(self) -> SmtpClientError:
+        return SmtpClientError(
+            kind="client_error",
+            failure=SmtpFailure.CONNECTION_FAILED,
+            detail=SmtpErrorNoCode(kind="no_code", message=self.message),
+        )
+
+
+class RawSmtpConnectError(BaseModel):
+    """Raw data from infrastructure edge."""
+    model_config = {"frozen": True}
+    kind: Literal["connect_error"]
+    message: str
+    
+    def to_foreign(self) -> SmtpConnectErrorForeign:
+        return SmtpConnectErrorForeign(message=self.message)
+```
+
+Usage: `raw.to_foreign().to_domain()` — pure model composition.
+
+---
+
+## ✅ Pattern: The Pure Executor
+
+The Executor composes models. It receives raw data, parses through the Foreign Model chain, and interprets via the Intent. No try/except—just pattern matching.
+
+```python
+class SmtpClient(BaseModel):
+    model_config = {"frozen": True}
+    host: str
+    port: int
+    
+    def parse(self, raw: RawSmtpResult) -> SmtpClientOutcome:
+        match raw:
+            case RawSmtpSuccess():
+                return raw.to_foreign().to_domain()
+            case RawSmtpConnectError():
+                return raw.to_foreign().to_domain()
+            # ... other variants
+
+
+class EmailExecutor(BaseModel):
+    model_config = {"frozen": True}
+    client: SmtpClient
+    
+    def execute(self, intent: SendEmailIntent, raw: RawSmtpResult) -> EmailResult:
+        outcome = self.client.parse(raw)
+        
+        match outcome:
+            case SmtpClientSuccess(message_id=mid):
+                return intent.on_sent(SmtpSent(kind="smtp_sent", message_id=mid))
+            
+            case SmtpClientError(failure=f) if intent.is_handled(f):
+                return intent.on_failed(SmtpFailed(kind="smtp_failed", failure=f))
+            
+            case SmtpClientError(failure=f):
+                return EmailUnhandled(kind="email_unhandled", recipient=intent.to, failure=f)
+```
+
+---
+
+## ✅ Pattern: Composing the Request
+
+No optionality. If the decision requires infrastructure, pair Intent with its result as a Sum Type.
+
+```python
+class ExecutableEmail(BaseModel):
+    """Intent paired with its infrastructure result."""
+    model_config = {"frozen": True}
+    kind: Literal["executable_email"]
+    intent: SendEmailIntent
+    raw: RawSmtpResult
+
+type DispatchRequest = ExecutableEmail | NoOp  # Not raw | None
+```
+
+---
+
+## Composition Root
+
+```python
+client = SmtpClient(host="smtp.example.com", port=587)
+executor = EmailExecutor(client=client)
+
+# At runtime:
+decision = user.decide_signup_action()
+
+match decision:
+    case NoOp() as no_op:
+        result = no_op
+    case SendEmailIntent() as intent:
+        raw: RawSmtpResult = ...  # From infrastructure edge
+        result = executor.execute(intent, raw)
+```
+
+---
+
+## Cognitive Checks
+
+- [ ] **Intent is Complete:** Carries parameters AND outcome mapping
+- [ ] **No try/except:** Models parse, they don't catch
+- [ ] **No Default Values:** `handled_failures`, `reason` explicit at construction
+- [ ] **No Optionality:** Sum Types replace `| None`
+- [ ] **Foreign Model Chain:** `raw.to_foreign().to_domain()`
+- [ ] **Executor Pattern-Matches:** No `isinstance()`, no `raise`

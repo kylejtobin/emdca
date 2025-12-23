@@ -1,22 +1,41 @@
 """
-THE PURE LOGIC (Process / Factory / Workflow)
+THE PURE LOGIC (Workflow / State Transitions)
 
-Role: Pure functions that calculate the next state or decision outcome.
+Role: Pure methods on frozen models that calculate next state or decision.
 Mandate: Mandate IX (Workflow) & IV (Intent).
 Pattern: spec/patterns/09-workflow-state-machine.md
 Pattern: spec/patterns/04-execution-intent.md
 
 Constraint:
-- Input: Domain Models / Foreign Models.
-- Output: New State + Decision Outcome (Intent or NoOp).
-- NO I/O. NO AWAIT.
+- State transitions are methods on the SOURCE state model.
+- Decision methods return Intent or NoOp.
+- NO I/O. NO AWAIT. Pure computation only.
 
 Example Implementation:
 ```python
-def step_conversation(state: Conversation, input: Message) -> tuple[Conversation, Intent | NoOp]:
-    # Decision Outcome is either:
-    # - Intent: Complete specification (parameters + on_success/on_failure)
-    # - NoOp: Domain decided no action needed (not executable)
-    ...
+from pydantic import BaseModel
+from typing import Literal
+
+class Active(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["active"]
+    conversation_id: str
+
+    def archive(self, reason: str) -> "Archived":
+        \"\"\"State transition: Active -> Archived\"\"\"
+        return Archived(
+            kind="archived",
+            conversation_id=self.conversation_id,
+            reason=reason,
+        )
+
+    def decide_response(self, message: "Message") -> "RespondIntent | NoOp":
+        \"\"\"Decision method: returns Intent or NoOp\"\"\"
+        if message.requires_response:
+            return RespondIntent(
+                conversation_id=self.conversation_id,
+                content=self._generate_content(message),
+            )
+        return NoOp(kind="no_op", reason="No response required")
 ```
 """

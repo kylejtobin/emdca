@@ -1,22 +1,33 @@
 """
-THE INTERFACE BUILDER (App Definition)
+THE INTERFACE BUILDER (App Factory)
 
 Role: Constructs the FastAPI application instance.
 Mandate: Mandate V (Configuration - Usage).
 Structure: spec/structure.md
 
 Constraint:
+- Factory is a method on a frozen Pydantic model.
 - Returns `FastAPI` object.
 - Does not run the server.
-- Wires dependencies via `dependency_overrides` or closure injection.
+- Receives pre-wired orchestrators (dependencies already injected as fields).
 
 Example Implementation:
 ```python
+from pydantic import BaseModel
 from fastapi import FastAPI
+from service.conversation import ConversationOrchestrator
 
-def create_api(config, db) -> FastAPI:
-    app = FastAPI()
-    # ... wiring ...
-    return app
+class AppFactory(BaseModel):
+    model_config = {"frozen": True}
+    config: AppConfig
+    orchestrator: ConversationOrchestrator
+
+    def create(self) -> FastAPI:
+        app = FastAPI()
+        
+        # Orchestrator already has its dependencies wired as fields
+        app.state.orchestrator = self.orchestrator
+        
+        return app
 ```
 """

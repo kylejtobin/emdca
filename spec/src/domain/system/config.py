@@ -12,10 +12,13 @@ Constraint:
 
 Example Implementation:
 ```python
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 
 class AppConfig(BaseModel):
     model_config = {"frozen": True}
-    # ... defined fields ...
+    nats_url: HttpUrl
+    redis_url: HttpUrl
+    debug_mode: bool
+    # No defaults — caller must provide all values
 ```
 """

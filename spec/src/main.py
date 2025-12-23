@@ -5,54 +5,59 @@ Role: The Big Bang. Configures and starts the application.
 Mandate: Mandate V (Config) & VIII (Coordination) & X (Infrastructure).
 Pattern: spec/patterns/05-config-injection.md
 Pattern: spec/patterns/10-infrastructure-capability-as-data.md
-Pattern: spec/patterns/04-execution-intent.md (Generic Executor)
 
 Flow:
-1. Load Env (Foreign) -> Config (Truth).
-2. Setup Infrastructure (via Intents + Generic Executor).
-3. Build Interface (create_api).
-4. Run (uvicorn).
+1. Load Env (Foreign) -> Config (Domain) via Sum Type result.
+2. Build Infrastructure clients (raw I/O, returns Sum Types).
+3. Wire Orchestrators with dependencies as fields.
+4. Build Interface via AppFactory model.
+5. Run (uvicorn).
+
+Note: This is the ONE place where standalone wiring code exists.
 
 Example Implementation:
 ```python
 import sys
+import asyncio
 import uvicorn
 import os
-from api.app import create_api
+from api.app import AppFactory
+from api.deps import Clock
 from domain.system.env import EnvVars
-from domain.infra.connection import ConnectIntent, ConnectionFailed
+from domain.infra.nats import NatsConnector, Connected, ConnectionFailed
+from service.conversation import ConversationOrchestrator, ConversationStore
 
 async def main():
-    # 1. Translate Config
+    # 1. Translate Config (Sum Type result)
     raw = os.environ
-    config = EnvVars.model_validate(raw).to_domain()
-
-    # 2. Setup Infrastructure (Intent-Based)
-    connect_intent = ConnectIntent(url=config.nats_url)
-    nc = None
-
-    async def do_connect():
-        nonlocal nc
-        nc = await nats.connect(connect_intent.url)
-        return nc
-
-    result = await execute(
-        operation=do_connect,
-        catch_names=connect_intent.catch_exceptions,
-        on_success=connect_intent.on_success,
-        on_failure=connect_intent.on_failure,
-    )
-
-    match result:
-        case ConnectionFailed(error=e):
-            sys.exit(f"Infrastructure setup failed: {e}")
-        case Connected():
+    config_result = EnvVars.model_validate(raw).to_config()
+    
+    match config_result:
+        case ConfigInvalid(errors=e):
+            sys.exit(f"Config invalid: {e}")
+        case ConfigValid(config=config):
             pass
 
-    # 3. Build Interface
-    app = create_api(config, nc)
+    # 2. Setup Infrastructure (Executor returns Sum Type)
+    connector = NatsConnector(url=config.nats_url)
+    connect_result = await connector.connect()
 
-    # 4. Run
+    match connect_result:
+        case ConnectionFailed(error=e):
+            sys.exit(f"Infrastructure setup failed: {e}")
+        case Connected(client=nc):
+            pass
+
+    # 3. Wire Orchestrators (dependencies as fields)
+    clock = Clock()
+    store = ConversationStore(db=db)
+    orchestrator = ConversationOrchestrator(store=store, bus=nc, clock=clock)
+
+    # 4. Build Interface via AppFactory
+    factory = AppFactory(config=config, orchestrator=orchestrator)
+    app = factory.create()
+
+    # 5. Run
     uvicorn.run(app)
 
 if __name__ == "__main__":

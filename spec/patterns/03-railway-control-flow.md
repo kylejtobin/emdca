@@ -4,7 +4,7 @@
 Logic is a flow of data. Branching should be handled as a topology of tracks, not as a series of exceptions or jumps.
 
 ## The Mechanism
-Logic branches happen inside the Factory, explicitly guiding data onto a "Success Track" (Success Context) or a "Failure Track" (Wait/Halt Context). Every logical branch must terminate in a return value; exceptions are strictly forbidden for domain logic.
+Logic branches happen inside methods on models, explicitly guiding data onto a "Success Track" or a "Failure Track". Every logical branch must terminate in a return value; exceptions are strictly forbidden for domain logic.
 
 ---
 
@@ -15,11 +15,7 @@ Exceptions are "GOTO" statements that jump up the stack, bypassing type checks a
 ```python
 def withdraw(account: Account, amount: int) -> Account:
     if amount > account.balance:
-        # ❌ Hidden Control Flow
-        # The signature implies this function always returns an Account.
-        # It lies. It might crash.
-        raise InsufficientFundsException()
-        
+        raise InsufficientFundsException()  # ❌ Hidden control flow
     return account.debit(amount)
 ```
 
@@ -31,95 +27,117 @@ from typing import Literal
 from pydantic import BaseModel
 
 class WithdrawalSuccess(BaseModel):
-    kind: Literal["success"] = "success"
+    model_config = {"frozen": True}
+    kind: Literal["success"]  # NO DEFAULT
     new_account_state: Account
     amount_withdrawn: int
 
 class InsufficientFunds(BaseModel):
-    kind: Literal["insufficient_funds"] = "insufficient_funds"
+    model_config = {"frozen": True}
+    kind: Literal["insufficient_funds"]  # NO DEFAULT
     current_balance: int
     requested_amount: int
 
-# The Truthful Signature
 type WithdrawalResult = WithdrawalSuccess | InsufficientFunds
 ```
 
 ---
 
 ## 2. The Railway Switch (Branching)
-Logic branches are decision points where data is routed onto different tracks.
+Logic branches are decision points. Withdraw is a method on Account that routes to success or failure.
 
+### ✅ Pattern: Decision Method on Aggregate
 ```python
-def withdraw(account: Account, amount: int) -> WithdrawalResult:
-    # 1. The Switch
-    if amount > account.balance:
-        # Route to Failure Track
-        return InsufficientFunds(
-            current_balance=account.balance, 
-            requested_amount=amount
-        )
+class Account(BaseModel):
+    model_config = {"frozen": True}
+    id: str
+    balance: int
     
-    # Route to Success Track
-    new_state = account.debit(amount)
-    return WithdrawalSuccess(
-        new_account_state=new_state,
-        amount_withdrawn=amount
-    )
+    def withdraw(self, amount: int) -> WithdrawalResult:
+        if amount > self.balance:
+            return InsufficientFunds(
+                kind="insufficient_funds",
+                current_balance=self.balance,
+                requested_amount=amount,
+            )
+        
+        new_state = Account(id=self.id, balance=self.balance - amount)
+        return WithdrawalSuccess(
+            kind="success",
+            new_account_state=new_state,
+            amount_withdrawn=amount,
+        )
 ```
 
 ---
 
 ## 3. Explicit Fall-through (No Implicit None)
-Sometimes a function decides "do nothing." This must be an explicit value, not `None`.
+"Do nothing" must be an explicit value, not `None`.
 
 ### ❌ Anti-Pattern: Returning None
 ```python
 def process_refund(order: Order):
     if not order.is_refundable:
-        return None  # ❌ Ambiguous. Did it fail? Did it finish?
-    ...
+        return None  # ❌ Ambiguous
 ```
 
 ### ✅ Pattern: The NoOp Result
 ```python
 class RefundProcessed(BaseModel):
-    kind: Literal["processed"] = "processed"
+    model_config = {"frozen": True}
+    kind: Literal["processed"]  # NO DEFAULT
     refund_id: str
 
 class RefundSkipped(BaseModel):
-    kind: Literal["skipped"] = "skipped"
+    model_config = {"frozen": True}
+    kind: Literal["skipped"]  # NO DEFAULT
     reason: str
 
 type RefundResult = RefundProcessed | RefundSkipped
 
-def process_refund(order: Order) -> RefundResult:
-    if not order.is_refundable:
-        return RefundSkipped(reason="Order outside refund window")
+
+class RefundableOrder(BaseModel):
+    """Order that can be refunded."""
+    model_config = {"frozen": True}
+    id: str
+    is_refundable: bool
     
-    # ... logic ...
-    return RefundProcessed(refund_id="123")
+    def process_refund(self) -> RefundResult:
+        if not self.is_refundable:
+            return RefundSkipped(kind="skipped", reason="Order outside refund window")
+        
+        return RefundProcessed(kind="processed", refund_id=f"refund-{self.id}")
 ```
 
 ---
 
 ## 4. Handling the Tracks (Pattern Matching)
-The caller MUST handle both tracks. The Type Checker enforces this exhaustiveness.
+The caller MUST handle both tracks. Handler is a model with coordination method.
 
+### ✅ Pattern: Handler Model
 ```python
-def handle_withdrawal_request(account: Account, amount: int):
-    result = withdraw(account, amount)
+class WithdrawalHandler(BaseModel):
+    """Handler for withdrawal requests."""
+    model_config = {"frozen": True}
     
-    match result:
-        case WithdrawalSuccess(new_account_state=state):
-            save_account(state)
-            dispense_cash(amount)
+    def handle(self, account: Account, amount: int) -> WithdrawalResult:
+        result = account.withdraw(amount)
+        
+        match result:
+            case WithdrawalSuccess(new_account_state=state):
+                # Caller handles persistence
+                return result
             
-        case InsufficientFunds(current_balance=bal):
-            # We are forced to handle this case
-            print(f"Error: You only have {bal}")
+            case InsufficientFunds():
+                # Caller handles error display
+                return result
 ```
 
-## 5. Cognitive Checks
-*   [ ] **Truthful Signature:** Does the return type annotation include the failure cases?
-*   [ ] **No Raises:** Did I grep for `raise`? (Only allowed for system panics like `OutOfMemory`).
-*   [ ] **No None:** Did I grep for `return None`? Use a `Skipped` or `NoOp` object instead.
+---
+
+## Cognitive Checks
+- [ ] **Truthful Signature:** Does the return type include the failure cases?
+- [ ] **No Raises:** Did I grep for `raise`? (Only allowed for system panics)
+- [ ] **No None:** Did I grep for `return None`? Use `Skipped` or `NoOp` instead
+- [ ] **No Defaults on kind:** Is every `kind: Literal[...]` explicit?
+- [ ] **Methods on Models:** Is decision logic a method on an aggregate, not a standalone function?

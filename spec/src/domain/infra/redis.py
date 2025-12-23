@@ -1,25 +1,50 @@
 """
-THE INFRASTRUCTURE CAPABILITY (Intents & Topology)
+THE INFRASTRUCTURE CAPABILITY (Redis)
 
-Role: Defines the Intents and Configuration for Redis.
+Role: Defines Capability Models and Executors for Redis.
 Mandate: Mandate X (Infra as Data) & IV (Intent).
 Pattern: spec/patterns/10-infrastructure-capability-as-data.md
 Pattern: spec/patterns/04-execution-intent.md
 
 Constraint:
-- Intents are Complete Specifications (parameters + on_success/on_failure + catch_exceptions).
-- Defines Topology as pure Config models.
-- No client libraries (no `redis-py`). Pure Data.
+- Capability Models mirror what Redis expects (interface contracts).
+- Executors are frozen Pydantic models that perform I/O and return Sum Types.
+- No exception catching in domain — infrastructure returns Sum Types.
+- No `| None` — use Sum Types for distinct states.
 
 Example Implementation:
 ```python
 from pydantic import BaseModel
+from typing import Literal
 
-class GetIntent(BaseModel):
+# Result Sum Types (explicit states, no None)
+class ValueFound(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["found"]
     key: str
-    catch_exceptions: tuple[str, ...] = ("ConnectionError", "TimeoutError")
+    value: bytes
 
-    def on_success(self, value: bytes | None) -> "ValueRetrieved": ...
-    def on_failure(self, error: str) -> "GetFailed": ...
+class KeyNotFound(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["not_found"]
+    key: str
+
+class GetFailed(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["failed"]
+    key: str
+    error: str
+
+type GetResult = ValueFound | KeyNotFound | GetFailed
+
+# Executor (frozen model with Redis connection as field)
+class RedisClient(BaseModel):
+    model_config = {"frozen": True}
+    connection: object  # Redis connection
+
+    async def get(self, key: str) -> GetResult:
+        \"\"\"Infrastructure edge: performs I/O, returns Sum Type.\"\"\"
+        # Shell code here catches exceptions, returns Sum Type
+        ...
 ```
 """

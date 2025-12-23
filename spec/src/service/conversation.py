@@ -1,43 +1,58 @@
 """
 THE ORCHESTRATOR (Service Layer)
 
-Role: The "Roadie". Connects the pipes between IO and Logic.
+Role: Frozen Pydantic model that coordinates I/O and Logic.
 Mandate: Mandate VIII (Coordination).
 Pattern: spec/patterns/08-orchestrator-loop.md
-Pattern: spec/patterns/04-execution-intent.md (Generic Executor)
+Pattern: spec/patterns/04-execution-intent.md
 
 Constraint:
-- Fetch -> Translate -> Decide -> Dispatch -> Execute -> Persist.
-- No Business Rules (if statements on domain data).
+- Orchestrator is a frozen Pydantic model with dependencies as FIELDS.
+- Flow: Fetch -> Translate -> Decide -> Execute -> Persist.
+- No Business Rules (decision logic belongs on domain models).
 - No Result Construction (Intents own on_success/on_failure).
-- Uses generic executor for Intent fulfillment.
-- Manages Transactions.
+- Uses match/case to dispatch on Sum Types.
 
 Example Implementation:
 ```python
-async def process_message(db, bus, msg_id):
-    # 1. Fetch (IO)
-    row = await db.fetchone(...)
+from pydantic import BaseModel
+from domain.conversation.store import ConversationStore, ConversationFound, ConversationNotFound
+from domain.conversation.entity import Active
+from domain.conversation.process import RespondIntent, NoOp
 
-    # 2. Translate (Foreign -> Domain)
-    message = DbMessage.model_validate(row).to_domain()
+class ConversationOrchestrator(BaseModel):
+    model_config = {"frozen": True}
+    store: ConversationStore      # Dependency as field
+    bus: NatsClient               # Dependency as field
 
-    # 3. Decide (Pure)
-    new_state, outcome = step_conversation(state, message)
+    async def process_message(self, msg_id: str) -> ProcessResult:
+        # 1. Fetch (via Store, returns Sum Type)
+        fetch_result = await self.store.fetch(msg_id)
 
-    # 4. Dispatch + Execute (Shell)
-    match outcome:
-        case NoOp():
-            pass
-        case PublishIntent() as intent:
-            result = await execute(
-                operation=lambda: bus.publish(...),
-                catch_names=intent.catch_exceptions,
-                on_success=intent.on_success,
-                on_failure=intent.on_failure,
-            )
+        match fetch_result:
+            case ConversationNotFound():
+                return MessageNotFound(kind="not_found", msg_id=msg_id)
+            case ConversationFound(conversation=conv):
+                pass
 
-    # 5. Persist (IO)
-    await db.execute(...)
+        # 2. Decide (pure method on domain model)
+        match conv:
+            case Active() as active:
+                outcome = active.decide_response(message)
+            case _:
+                outcome = NoOp(kind="no_op", reason="Conversation not active")
+
+        # 3. Execute (dispatch on Intent)
+        match outcome:
+            case NoOp():
+                pass
+            case RespondIntent() as intent:
+                result = await self.bus.publish(intent)
+                # Intent owns interpretation via on_success/on_failure
+
+        # 4. Persist
+        await self.store.save(conv)
+
+        return MessageProcessed(kind="processed", msg_id=msg_id)
 ```
 """

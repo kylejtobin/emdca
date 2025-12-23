@@ -25,16 +25,18 @@ EMDCA fixes this structurally:
 
 ## ⚖️ The 10 Mandates
 
-1.  **Construction:** Use Value Objects & Pure Factories. Parse, don't validate. ([Pattern 01](spec/patterns/01-factory-construction.md))
-2.  **State:** Use Sum Types (Discriminated Unions). Make invalid states unrepresentable. ([Pattern 02](spec/patterns/02-state-sum-types.md))
-3.  **Control Flow:** Use Railway Oriented Programming. No Exceptions for logic. ([Pattern 03](spec/patterns/03-railway-control-flow.md))
-4.  **Execution:** Return Intents as Contracts. Complete specification of side effects and outcomes. ([Pattern 04](spec/patterns/04-execution-intent.md))
-5.  **Configuration:** Treat EnvVars as Foreign Reality. Translate to pure AppConfig. ([Pattern 05](spec/patterns/05-config-injection.md))
-6.  **Storage:** Treat DB as Foreign Reality. Translate to pure Domain Objects. ([Pattern 06](spec/patterns/06-storage-foreign-reality.md))
-7.  **Translation:** Use Foreign Models. Declarative mapping of External Reality to Internal Truth. ([Pattern 07](spec/patterns/07-acl-translation.md))
-8.  **Coordination:** Use a Dumb Orchestrator. The loop only moves data; it never thinks. ([Pattern 08](spec/patterns/08-orchestrator-loop.md))
-9.  **Workflow:** Model Process as a State Machine. The Domain drives the next step. ([Pattern 09](spec/patterns/09-workflow-state-machine.md))
-10. **Infrastructure:** Model Capability as Data. Topology is configuration, not code. ([Pattern 10](spec/patterns/10-infrastructure-capability-as-data.md))
+1.  **Construction:** Factory methods on frozen Pydantic models. Parse, don't validate.
+2.  **State:** Sum Types (Discriminated Unions). Make invalid states unrepresentable.
+3.  **Control Flow:** Railway Oriented Programming. No exceptions for domain logic.
+4.  **Execution:** Intents as Contracts. Infrastructure returns Sum Types; models parse.
+5.  **Configuration:** EnvVars as Foreign Reality. Translate to pure AppConfig.
+6.  **Storage:** DB as Foreign Reality. Stores are Pydantic models injected as fields.
+7.  **Translation:** Foreign Models with `.to_domain()`. Declarative mapping at the border.
+8.  **Coordination:** Orchestrators are Pydantic models with dependencies as fields.
+9.  **Workflow:** Process as State Machine. Transitions are methods on source state.
+10. **Infrastructure:** Capability as Data. Model what infrastructure expects.
+
+**→ Read the [Architecture Spec](spec/arch.md) for the principles, then the [Patterns](spec/patterns/) for implementation.**
 
 ---
 
@@ -68,13 +70,16 @@ The Mirror runs:
 
 ## 🚀 Getting Started
 
-**To Learn:** Read the [Manifesto](manifesto.md), then the [Architecture Spec](spec/arch.md).
+**To Learn:** 
+1. Read this README for the overview
+2. Read the [Architecture Spec](spec/arch.md) for the principles
+3. Read the [Patterns](spec/patterns/) for implementation details
 
 **To Reference:** Copy `spec/` into your project. Use the patterns as a style guide.
 
-**To Build:** Start from the [Reference Skeleton](spec/skeleton.md). Every file in `spec/src/` contains structural docstrings linking back to the mandates.
+**To Build:** Start from the [Reference Skeleton](spec/skeleton.md). Every file links back to the mandates.
 
-**For AI Agents:** This repo is designed for you. The `.cursor/rules/` prime your context, and the Mirror hooks correct your output. The constraints act as guardrails—hallucinations become compilation errors.
+**For AI Agents:** This repo is designed for you. The `.cursor/rules/` prime your context. The constraints act as guardrails—hallucinations become compilation errors.
 
 ---
 

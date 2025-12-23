@@ -1,6 +1,8 @@
-## **Architecture Specification: Explicitly Modeled Data-Centric Architecture (EMDCA)**.
+## **Architecture Specification: Explicitly Modeled Data-Centric Architecture (EMDCA)**
 
 This document contains the non-negotiable engineering standards for the system. It is written as a strict set of directives for developers to follow without ambiguity.
+
+**For implementation details, see the [Patterns Library](patterns/).**
 
 ---
 
@@ -10,17 +12,19 @@ This document contains the non-negotiable engineering standards for the system. 
 
 #### **MUST USE:**
 
-* **Pure Factories:** All domain logic and decision-making must live exclusively in **Pure Factory Functions**. These functions accept raw, unstructured data and "parse" it into a valid Domain Type.  
-* **Value Objects:** Primitive Obsession is forbidden. Use **Value Objects** (Rich Types) to wrap all primitives (e.g., `EmailAddress` instead of `str`).
-* **Explicit Construction:** Never use default values in Domain Models (e.g., `status: str = 'pending'`). Defaults are hidden business rules. The Factory must set every field explicitly.
-* **Parse, Don't Validate:** Instead of checking if data.is\_valid, try to construct the success type. If the data is invalid, the factory must return a distinct Failure Type.  
-* **Total Functions:** The factory must handle **every** possible input state and return a valid result object (Success or Failure). It must never crash or raise unhandled exceptions on expected domain data.
+* **Factory Methods on Models:** All domain logic and decision-making must live as methods on frozen Pydantic models. These methods accept raw data and "parse" it into a valid Domain Type.
+* **Value Objects:** Primitive Obsession is forbidden. Use Pydantic built-ins (`EmailStr`, `PositiveInt`) over hand-rolled validators.
+* **Explicit Construction:** Never use default values in Domain Models. Defaults are hidden business rules. The Factory must set every field explicitly.
+* **Parse, Don't Validate:** Instead of checking if data is valid, construct the success type. If invalid, return a distinct Failure Type.
+* **Total Functions:** The factory must handle **every** possible input state and return a valid result object (Success or Failure). It must never crash or raise unhandled exceptions.
 
 #### **MUST NOT USE:**
 
-* **Side Effects in Factories:** The factory must **never** perform I/O, database queries, API calls, or read global variables. It must be a pure function of its inputs.  
-* **The "Draft" Object:** Never create an empty or partial object and populate it field-by-field. Objects must be complete and valid from the moment of instantiation.  
-* **Validation Methods:** Never write an .is\_valid() method on a model. If an object exists, it is valid by definition.
+* **Side Effects in Factories:** The factory must **never** perform I/O. It must be a pure function of its inputs.
+* **Standalone Functions:** All logic is methods on frozen Pydantic models.
+* **Validation Methods:** Never write an `.is_valid()` method. If an object exists, it is valid by definition.
+
+→ **[Pattern 01: Factory Construction](patterns/01-factory-construction.md)**
 
 ---
 
@@ -30,15 +34,19 @@ This document contains the non-negotiable engineering standards for the system. 
 
 #### **MUST USE:**
 
-* **Discriminated Unions (Sum Types):** Mutually exclusive realities must be modeled as Unions of distinct Types (e.g., EvaluationResult \= EnterContext | WaitContext).  
-* **Structural Proofs:** Each Context type must contain the specific data required for that reality (e.g., EnterContext must contain an EntryProposal).  
-* **Behavioral Enums:** Simple state machines should be modeled as **Behavioral Enums** (Smart Enums) where the logic lives on the Enum member itself.
-* **Pattern Matching:** Use structural pattern matching (e.g., match/case) to handle the different realities returned by the factory.
+* **Discriminated Unions (Sum Types):** Mutually exclusive realities must be modeled as Unions of distinct Types.
+* **Structural Proofs:** Each variant must contain the specific data required for that reality.
+* **Smart Enums (`StrEnum`):** Simple state machines should use Smart Enums with `@property` methods for behavior.
+* **Pattern Matching:** Use `match/case` to handle the different realities.
+* **Transitions as Methods:** State transitions are methods on the source state returning the target state.
 
 #### **MUST NOT USE:**
 
-* **The God Model (Product Types):** Never use a single class with optional fields to represent conflicting states (e.g., a class containing both entry\_data and exit\_data where one is always None).  
-* **Boolean Flags for State:** Never use boolean flags (e.g., is\_entering, is\_waiting) to determine the state of an object. The **Type** of the object determines the state.
+* **The God Model (Product Types):** Never use a single class with optional fields to represent conflicting states.
+* **Boolean Flags for State:** Never use boolean flags to determine state. The **Type** determines the state.
+* **`| None` for Optionality:** Use Sum Types for mutually exclusive states, not `None`.
+
+→ **[Pattern 02: State Sum Types](patterns/02-state-sum-types.md)**
 
 ---
 
@@ -48,38 +56,42 @@ This document contains the non-negotiable engineering standards for the system. 
 
 #### **MUST USE:**
 
-* **The Railway Switch:** Logic branches must happen inside the Factory. The flow must explicitly guide data onto either a "Success Track" (returning a Success Context) or a "Failure Track" (returning a Wait/Halt Context).  
-* **Explicit Fall-through:** Every logical branch must terminate in a return value. "Doing nothing" must be represented by an explicit WaitContext, not by returning None.
+* **The Railway Switch:** Logic branches must happen inside methods on models. The flow must explicitly guide data onto either a "Success Track" or a "Failure Track".
+* **Explicit Fall-through:** Every logical branch must terminate in a return value. "Doing nothing" must be represented by an explicit `NoOp` type, not `None`.
+* **Result Types:** Return `Success | Failure` discriminated unions.
 
 #### **MUST NOT USE:**
 
-* **Exceptions for Control Flow:** Never use try/except to handle domain logic (e.g., InsufficientFundsException). Exceptions are strictly for system failures (Network Down, OOM).  
-* **Implicit Returns:** Never allow a function to return None implicitly. The return type must always be explicit.
+* **Exceptions for Control Flow:** Never use `try/except` to handle domain logic. Exceptions are strictly for system failures.
+* **Implicit Returns:** Never allow a function to return `None` implicitly. The return type must always be explicit.
+* **`raise` for Domain Logic:** Models parse data into Sum Types. They don't raise.
+
+→ **[Pattern 03: Railway Control Flow](patterns/03-railway-control-flow.md)**
 
 ---
 
-### **IV. The Execution Mandate: Intent as Data**
+### **IV. The Execution Mandate: Intent as Contract**
 
-**The Principle:** Deciding to do something and doing it are separate concerns. The "Core" decides; the "Shell" executes.
+**The Principle:** Deciding to do something and doing it are separate concerns. The Domain decides; the Shell executes. Infrastructure returns Sum Types; models parse.
 
 #### **MUST USE:**
 
-* **Command Objects (Intents):** The domain model must return inert, serializable **Specification Objects** describing the side effect AND its outcome interpretation.
+* **Intents:** The domain model must return inert, serializable specification objects describing the side effect AND its outcome interpretation.
 * **Complete Instructions:** The Intent must contain:
     1. **Execution Parameters:** All data required to perform the operation.
-    2. **Success Mapping:** How to transform **primitives extracted from** the raw infrastructure result into a Domain Success type.
-    3. **Failure Mapping:** How to transform the error string into a Domain Failure type.
-    4. **Exception Classification:** Which infrastructure exceptions represent expected failures (return Failure type) vs. system panics (propagate).
-
-Note: The `on_success` method receives **primitives** (strings, ints, bools), never foreign objects. The Shell extracts values from infrastructure responses before calling Intent methods. This keeps the Domain completely decoupled from infrastructure response shapes.
-* **Generic Execution:** The Shell should be able to execute ANY Intent using a single generic executor function. If adding a new Intent requires new code in the Shell beyond wiring, the Intent is incomplete.
+    2. **Success Mapping (`on_success`):** How to transform the raw result into a Domain Success type.
+    3. **Failure Mapping (`on_failure`):** How to transform the failure into a Domain Failure type.
+    4. **Handled Failures:** Which failures the domain handles gracefully vs. treats as unhandled.
+* **Infrastructure as Sum Type:** Infrastructure captures raw results as Sum Types—never exceptions.
+* **Foreign Model Chain:** `raw.to_foreign().to_domain()` for parsing infrastructure results.
 
 #### **MUST NOT USE:**
 
-* **Service Injection:** Never inject a "Service" or "Client" into a domain model. Models must never call methods like .execute() or .save().  
-* **Closures/Callbacks:** Intents must be pure data (JSON serializable), not functions or code blocks.
-* **Per-Operation Exception Handling:** The Shell must not contain operation-specific try/except blocks that construct domain Result types. Exception-to-Result mapping belongs in the Intent specification.
-* **Result Construction in Shell:** The Shell must not directly instantiate Success or Failure types. It calls the Intent's mapping methods.
+* **`try/except` in Domain:** Models parse Sum Types. The Shell never catches exceptions to build domain Results.
+* **Service Injection:** Never inject a "Service" or "Client" into a domain model.
+* **Closures/Callbacks:** Intents must be pure data (JSON serializable), not functions.
+
+→ **[Pattern 04: Execution Intent](patterns/04-execution-intent.md)**
 
 ---
 
@@ -89,99 +101,112 @@ Note: The `on_success` method receives **primitives** (strings, ints, bools), ne
 
 #### **MUST USE:**
 
-* **Foreign Models for Env:** Explicitly model the raw environment (e.g., `EnvVars`) using declaration mapping (aliases) to handle the chaotic naming conventions of the OS.
-* **Explicit Translation:** Convert the raw environment model into a pure Domain Config object at the application entry point.
-* **Context Injection:** Pass the resolved Domain Config into logic functions as arguments.
+* **Foreign Models for Env:** Explicitly model the raw environment (`EnvVars`) using `Field(alias=...)` to handle OS naming conventions.
+* **Explicit Translation:** Convert the raw environment model into a pure Domain Config via `.to_domain()`.
+* **Config Result:** Model config loading as `ConfigLoaded | ConfigInvalid` Sum Type.
+* **No Defaults:** All fields required. Defaults hide configuration requirements.
 
 #### **MUST NOT USE:**
 
-* **Magic Binding:** Never use libraries that automatically map `os.environ` directly to Domain Config objects. The translation must be visible.
-* **Global Variables:** Never access `os.environ` or global config singletons from within the domain logic.
+* **Magic Binding:** Never use libraries that automatically map `os.environ` to Domain Config.
+* **Global Variables:** Never access `os.environ` from within domain logic.
+
+→ **[Pattern 05: Config Injection](patterns/05-config-injection.md)**
 
 ---
 
-### **VI. The Abstraction Mandate: Storage as Foreign Reality**
+### **VI. The Storage Mandate: DB as Foreign Reality**
 
-**The Principle:** The Domain Core must be agnostic to the mechanism of data storage. The Database is just another **Foreign Reality** (External System) that must be explicitly modeled and translated.
+**The Principle:** The Domain Core must be agnostic to the mechanism of data storage. The Database is just another **Foreign Reality** that must be explicitly modeled and translated.
 
 #### **MUST USE:**
 
-*   **Foreign Models for Storage:** Define Pydantic models (e.g., `DbOrder`) that represent the exact shape of the database table.
-*   **Shell Execution:** The Shell (Service Layer) executes the I/O (SQL queries), validates the result into the Foreign Model, and translates it to the Domain Object (`.to_domain()`).
+* **Foreign Models for Storage:** Define Pydantic models (`DbOrder`) that represent the exact shape of the database table with `.to_domain()` method.
+* **Stores as Executors:** Frozen Pydantic models that handle DB I/O, injected into orchestrators as fields.
+* **Query Results as Sum Types:** Model results as `OrderFound | OrderNotFound`, not `Order | None`.
 
 #### **MUST NOT USE:**
 
-*   **Direct I/O in Domain:** Never write SQL, file paths, or specific database import statements inside a Domain Model or Factory.
-*   **Leaky Abstractions:** Do not return database-specific cursors or ORM objects (like SQLAlchemy Row Proxies) into the Domain. The Shell must naturalize the data immediately.
+* **Repository Pattern:** No abstract repository interfaces. Stores are concrete Pydantic models.
+* **Direct I/O in Domain:** Never write SQL inside Domain Models.
+* **Implicit None:** Never return `None` for "not found". Use explicit Sum Type.
+
+→ **[Pattern 06: Storage Foreign Reality](patterns/06-storage-foreign-reality.md)**
 
 ---
 
 ### **VII. The Translation Mandate: Foreign Reality vs. Internal Truth**
 
-**The Principle:** The outside world speaks a chaotic language; the Domain speaks a strict language. We must explicitly model both the **Foreign Reality** (external systems) and the **Internal Truth** (business concepts). Translation is the act of naturalizing the foreign into the internal.
+**The Principle:** The outside world speaks a chaotic language; the Domain speaks a strict language. Translation is the act of naturalizing the foreign into the internal.
 
 #### **MUST USE:**
 
-* **Foreign Models:** Define Domain Objects that mirror external schemas exactly (e.g., `CoinbaseCandle`). These are not dumb DTOs; they represent the domain's knowledge of the external world.
-* **Declarative Mapping:** Use field aliasing (e.g., `Field(alias="o")`) to handle naming friction declaratively at the type level.
-* **Self-Translation:** The Foreign Model must own the method (e.g., `.to_domain()`) that converts itself into the Internal Truth.
+* **Foreign Models:** Define frozen Pydantic models that mirror external schemas exactly with `model_config = {"frozen": True}`.
+* **Declarative Mapping:** Use `Field(alias=...)` to handle naming friction declaratively.
+* **Self-Translation:** The Foreign Model must own the `.to_domain()` method.
 
 #### **MUST NOT USE:**
 
-* **Imperative Mappers:** Never write standalone functions that copy fields from A to B. Translation logic belongs on the Foreign Model.
-* **Dict Passing:** Never pass raw dictionaries or JSON blobs deep into the system. Validate them against the Foreign Model immediately at the border.
+* **Imperative Mappers:** Never write standalone functions that copy fields from A to B.
+* **Dict Passing:** Never pass raw dictionaries deep into the system. Validate immediately at the border.
+
+→ **[Pattern 07: ACL Translation](patterns/07-acl-translation.md)**
 
 ---
 
 ### **VIII. The Coordination Mandate: The Orchestrator**
 
-**The Principle:** A system needs a "driver" that does no thinking, only moving. It coordinates the flow of data between the Repository, the Factory, and the Execution shell.
+**The Principle:** A system needs a "driver" that does no thinking, only moving. It coordinates the flow of data between Stores, Domain Models, and Executors.
 
 #### **MUST USE:**
 
-* **The Main Loop (Application Service):** A "dumb" procedural loop that performs the following cycle:
-    1.  **Fetch** (Call Repository)
-    2.  **Translate** (Call ACL/Mapper)
-    3.  **Decide** (Call Pure Factory)
-    4.  **Act** (Execute Intent)
-    5.  **Persist** (Call Repository to save state)
-* **Piping:** The Orchestrator treats data as a pipe. It takes the output of step 1 and feeds it as the input to step 2.
+* **Orchestrators as Pydantic Models:** Frozen Pydantic models with **dependencies as fields** (stores, gateways, executors).
+* **The Main Loop:** Fetch → Translate → Decide → Act → Persist.
+* **Dumb Piping:** The Orchestrator takes output from step N and feeds it as input to step N+1.
 
 #### **MUST NOT USE:**
 
-* **Logic in the Loop:** The Orchestrator must never contain `if` statements related to business rules (e.g., `if price > 100`). Its only logic should be flow control (start/stop/sleep).
-* **Orchestrator Injection:** Never pass the Orchestrator itself into a Domain Model. The Core should not know it is being orchestrated.
+* **Logic in the Loop:** The Orchestrator must never contain `if` statements related to business rules. Its only logic is flow control.
+* **Stateless Orchestrators:** If your orchestrator has no fields, you're hiding dependencies. Inject them.
+* **Standalone Functions:** Orchestrators are models with methods, not functions.
+
+→ **[Pattern 08: Orchestrator Loop](patterns/08-orchestrator-loop.md)**
 
 ---
 
 ### **IX. The Workflow Mandate: Process as State Machine**
 
-**The Principle:** The sequence of business steps (A → B → C) is Business Logic, not plumbing. Therefore, workflows must be modeled as State Machines in the Domain, not as procedural scripts in the Service.
+**The Principle:** The sequence of business steps is Business Logic, not plumbing. Workflows must be modeled as State Machines in the Domain.
 
 #### **MUST USE:**
 
-* **Workflow Models:** Create explicit Domain Models that represent the *lifecycle* of a process (e.g., `SignupWorkflow`).
-* **Next-Step Intents:** The Domain must return an Intent indicating the *next* logical step in the chain (e.g., `return SignupResult(next_step=SendEmailIntent)`).
-* **State Machines:** Use the Factory to determine transitions. The Factory accepts the `CurrentState` + `Input` and returns the `NextState` + `Intent`.
+* **Workflow States as Sum Types:** Explicit types for each state (`SignupPending`, `SignupVerified`, `SignupCompleted`).
+* **Transitions as Methods:** State transitions are methods on the source state returning `(NewState, Intent)`.
+* **Workflow Runner:** Frozen Pydantic model with `workflow` and `store` as fields.
 
 #### **MUST NOT USE:**
 
-* **Procedural Orchestration:** Never write a function in the Service layer that contains a sequence of `if/else` checks to determine the order of operations (e.g., `if user.is_vip: send_gold_email()`).
-* **Hidden Chains:** Do not chain side effects implicitly (e.g., a database trigger that starts a shipping job). The flow must be visible and explicit in the Domain logic.
+* **Procedural Orchestration:** Never write `if/else` chains in the Service layer to determine operation order.
+* **Hidden Chains:** Do not chain side effects implicitly. The flow must be visible in Domain logic.
+* **Default Values on `kind`:** All discriminator fields must be explicit.
+
+→ **[Pattern 09: Workflow State Machine](patterns/09-workflow-state-machine.md)**
 
 ---
 
 ### **X. The Infrastructure Mandate: Capability as Data**
 
-**The Principle:** Infrastructure is a capability to be modeled as Data, not a Service to be executed. The Domain defines the *Topology* and *Intent* of the infrastructure as pure values, while the Shell handles the *Runtime Connection*.
+**The Principle:** Infrastructure has a shape. Model it. The Domain defines the *Topology* as pure Pydantic models, while the Shell handles the *Runtime Connection*.
 
 #### **MUST USE:**
 
-* **Infrastructure Models:** Define the "Shape" of the infrastructure using pure Domain Models (e.g., `NatsStream`, `S3BucketConfig`). These models describe *what* the infrastructure looks like, not *how* to connect to it.
-* **Topology as Config:** The generic constraints of the infrastructure (retention policies, subject hierarchies, queue names) must be defined in the Domain, allowing the logic to reason about the topology.
-* **Shell Execution:** The Shell (Service Layer) receives Intents from the Domain and executes them using client libraries (e.g., `nats-py`, `boto3`). No "Adapter Class" wrapper is required if the client is simple.
+* **Capability Models:** Frozen Pydantic models that mirror what infrastructure systems expect (stream configs, bucket policies).
+* **Failure Models:** Smart Enums (`StrEnum`) that enumerate how infrastructure can fail.
+* **Capability in Intent:** Intents reference capability models; execution is separate.
 
 #### **MUST NOT USE:**
 
-* **Active Clients in Domain:** Never import or instantiate live clients (e.g., `nats.connect()`, `boto3.client()`) inside the Domain. The Domain models the *configuration* of the client, not the client instance.
-* **Logic in Adapters:** The Adapter must never make decisions (e.g., "if event type is A, publish to topic B"). It must only execute exactly what the Intent describes.
+* **Active Clients in Domain:** Never import or instantiate live clients (`nats.connect()`, `boto3.client()`) inside the Domain.
+* **Logic in Adapters:** The Adapter must never make decisions. It executes exactly what the Intent describes.
+
+→ **[Pattern 10: Infrastructure Capability](patterns/10-infrastructure-capability-as-data.md)**

@@ -6,18 +6,16 @@ The Database is just another External System. It is a **Foreign Reality** that m
 ## The Mechanism
 1.  **Foreign Models (Schema):** The Domain defines `DbOrder` (Pydantic) representing the SQL table structure.
 2.  **Self-Translation:** `DbOrder` knows how to convert itself into `Order` (Internal Truth).
-3.  **Shell Execution:** The Service Layer executes the query, validates the result into `DbOrder`, and translates it to `Order` before passing it to the Logic.
+3.  **Orchestrator Execution:** The Orchestrator executes the query, validates into `DbOrder`, and translates to `Order`.
 
 ---
 
 ## 1. The Repository Abstraction (Anti-Pattern)
-Traditional "Repository Patterns" hide the translation logic inside a class, often coupling the Domain to an interface that mimics a collection. This hides the cost of serialization and creates "Magic" objects.
+Traditional "Repository Patterns" hide translation logic, coupling the Domain to an interface that mimics a collection.
 
 ### ❌ Anti-Pattern: The Magic Repo
 ```python
-# The Domain "thinks" it's getting an Order, but the conversion is hidden.
-# We don't know if 'repo.get()' is efficient or what shape it returns from the DB.
-order = repo.get(order_id)
+order = repo.get(order_id)  # ❌ Hidden translation, hidden query
 ```
 
 ---
@@ -27,76 +25,116 @@ We model the database row explicitly. This lives in the Domain because knowing t
 
 ### ✅ Pattern: The DB Model
 ```python
-# domain/order/store.py (Foreign Model)
 from pydantic import BaseModel
-from .entity import Order, OrderId, OrderStatus
 
 class DbOrder(BaseModel):
-    """
-    Represents the 'orders' table in Postgres.
-    This is NOT the Domain Entity. It is the Persistence Shape.
-    """
+    """Foreign Model: Represents the 'orders' table."""
+    model_config = {"frozen": True}
+    
     id: str
     status: str
     amount_cents: int
     
     def to_domain(self) -> Order:
-        """Pure Translation Logic"""
         return Order(
             id=OrderId(self.id),
             status=OrderStatus(self.status),
-            amount=Money.from_cents(self.amount_cents)
+            amount=Money.from_cents(self.amount_cents),
         )
 ```
 
 ---
 
-## 3. The Shell Execution (No Adapter Class)
-The Service Layer (Shell) is responsible for the I/O. It uses a raw database client (like SQLAlchemy Core or asyncpg) to fetch data, then immediately naturalizes it.
+## 3. Query Result (Sum Type)
+Model the query result explicitly—found or not found.
 
-### ✅ Pattern: Fetch -> Validate -> Translate
+### ✅ Pattern: Explicit Result
 ```python
-# service/order.py (The Shell)
-from sqlalchemy import select
-from domain.order.store import DbOrder
+from typing import Literal
 
-async def process_order(order_id: str, db: AsyncSession):
-    # 1. Fetch (Impure I/O)
-    # We execute a raw, efficient query.
-    result = await db.execute(select(orders_table).where(id=order_id))
-    row = result.first()
-    
-    if not row:
-        return
+class OrderFound(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["found"]
+    order: Order
 
-    # 2. Validate Reality (Foreign Model)
-    # Ensure the DB data matches our schema expectation.
-    db_order = DbOrder.model_validate(row)
+class OrderNotFound(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["not_found"]
+    order_id: str
 
-    # 3. Translate to Truth (Pure Domain)
-    order = db_order.to_domain()
-
-    # 4. Execute Logic (Pure)
-    intent = order.mark_shipped()
-
-    # 5. Persist Result (Impure I/O)
-    await db.execute(
-        orders_table.update()
-        .where(id=order_id)
-        .values(status=intent.new_status.value)
-    )
+type FetchOrderResult = OrderFound | OrderNotFound
 ```
 
 ---
 
-## 4. Why No Repository Class?
-By removing the Repository Class:
-1.  **Visible I/O:** You can see exactly what query is running in the Service.
-2.  **Explicit Translation:** The `.to_domain()` call proves that we are crossing a boundary.
-3.  **No Mocking:** You test the Logic by passing `Order` objects directly. You test the Service with a real DB (integration test). You don't need to mock a "Repository Interface."
+## 4. The Store Executor
+The Store is a frozen Pydantic model that handles DB I/O. It's injected into orchestrators.
 
-## 5. Cognitive Checks
-*   [ ] **Schema in Domain:** Does `domain/context/store.py` exist with Pydantic models?
-*   [ ] **No SQL in Domain:** The Domain defines the shape (`DbOrder`), but never imports `sqlalchemy`.
-*   [ ] **Explicit Translation:** Does the Service line read `DbOrder.model_validate(row).to_domain()`?
-*   [ ] **No Generic Repos:** Did I delete `class OrderRepository`?
+### ✅ Pattern: Store as Executor
+```python
+class OrderStore(BaseModel):
+    """Executor for order persistence. Injected into orchestrators."""
+    model_config = {"frozen": True}
+    
+    async def fetch(self, order_id: str, db: AsyncSession) -> FetchOrderResult:
+        result = await db.execute(select(orders_table).where(id=order_id))
+        row = result.first()
+        
+        if not row:
+            return OrderNotFound(kind="not_found", order_id=order_id)
+        
+        db_order = DbOrder.model_validate(row)
+        order = db_order.to_domain()
+        return OrderFound(kind="found", order=order)
+    
+    async def save_status(self, order_id: str, status: OrderStatus, db: AsyncSession) -> None:
+        await db.execute(
+            orders_table.update()
+            .where(id=order_id)
+            .values(status=status.value)
+        )
+```
+
+---
+
+## 5. The Orchestrator (Pydantic Model)
+The Orchestrator declares its dependencies as fields. Application-scoped dependencies are injected; request-scoped resources (like `db`) are passed as arguments.
+
+### ✅ Pattern: Dependencies as Fields
+```python
+class OrderProcessor(BaseModel):
+    """Orchestrator with injected store."""
+    model_config = {"frozen": True}
+    
+    store: OrderStore  # Injected dependency
+    
+    async def process(self, order_id: str, db: AsyncSession) -> ProcessResult:
+        fetch_result = await self.store.fetch(order_id, db)
+        
+        match fetch_result:
+            case OrderNotFound():
+                return fetch_result
+            
+            case OrderFound(order=order):
+                intent = order.mark_shipped()
+                await self.store.save_status(order_id, intent.new_status, db)
+                return OrderProcessed(kind="processed", order_id=order_id)
+```
+
+---
+
+## 6. Why No Repository Class?
+By removing the Repository Class:
+1.  **Visible I/O:** You see exactly what query runs.
+2.  **Explicit Translation:** The `.to_domain()` proves boundary crossing.
+3.  **No Mocking:** Test Logic with `Order` objects directly.
+
+---
+
+## Cognitive Checks
+- [ ] **Schema in Domain:** Does `domain/context/store.py` exist with Pydantic models?
+- [ ] **No SQL in Domain:** The Domain defines the shape, never imports `sqlalchemy`.
+- [ ] **Explicit Translation:** Does it read `DbOrder.model_validate(row).to_domain()`?
+- [ ] **No Implicit None:** Is "not found" an explicit `OrderNotFound` type?
+- [ ] **Store as Executor:** Is the store a `BaseModel` with I/O methods?
+- [ ] **Dependencies as Fields:** Does the orchestrator have `store: OrderStore` as a field?

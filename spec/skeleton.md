@@ -19,13 +19,11 @@ src/
 │   ├── deps.py              # Shared Dependencies
 │   └── conversation.py      # The Router (Interface Adapter)
 ├── service/
-│   └── conversation.py      # The Orchestrator (Service Layer)
+│   └── conversation.py      # Store/Orchestrator/Executor models (deps as fields)
 └── domain/
     ├── system/              # System Context
     │   ├── config.py        # Internal Truth (Config)
     │   └── env.py           # Foreign Reality (EnvVars)
-    ├── shared/              # Shared Context
-    │   └── primitives.py    # Ubiquitous Language (Value Objects)
     ├── infra/               # Infrastructure Context
     │   ├── nats.py          # Intents: ConnectIntent, PublishIntent
     │   └── redis.py         # Intents: ConnectIntent, GetIntent
@@ -34,7 +32,7 @@ src/
         ├── api.py           # Foreign Reality (API Contract)
         ├── vendor.py        # Foreign Reality (Vendor Schema)
         ├── store.py         # Foreign Reality (Database Schema)
-        └── process.py       # Pure Logic (Factory / Workflow)
+        └── workflow.py      # Aggregates with decision methods
 ```
 
 ## 🔗 The Reverse Index

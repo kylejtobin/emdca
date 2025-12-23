@@ -7,13 +7,36 @@ Pattern: spec/patterns/07-acl-translation.md
 Pattern: spec/patterns/10-infrastructure-capability-as-data.md
 
 Constraint:
-- Mirrors the external API exactly (using aliases).
+- Frozen Pydantic models that mirror external API exactly (using aliases).
 - Owns .to_domain() to convert to Internal Truth.
+- Infrastructure returns these as Sum Types (success variant contains vendor model).
 
 Example Implementation:
 ```python
 from pydantic import BaseModel, Field
+from typing import Literal
 
-class OpenAiCompletion(BaseModel): ...
+# Raw infrastructure result (what the executor captures)
+class OpenAiSuccess(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["success"]
+    payload: dict  # Raw JSON from API
+
+class OpenAiFailure(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["failure"]
+    error: str
+    status_code: int
+
+type OpenAiRawResult = OpenAiSuccess | OpenAiFailure
+
+# Foreign Model (parsed from payload)
+class OpenAiCompletion(BaseModel):
+    model_config = {"frozen": True}
+    id: str = Field(alias="id")
+    content: str = Field(alias="choices[0].message.content")
+    
+    def to_domain(self) -> "AssistantMessage":
+        return AssistantMessage(content=self.content)
 ```
 """

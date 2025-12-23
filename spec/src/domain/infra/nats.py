@@ -1,25 +1,51 @@
 """
-THE INFRASTRUCTURE CAPABILITY (Intents & Topology)
+THE INFRASTRUCTURE CAPABILITY (NATS)
 
-Role: Defines the Intents and Configuration for NATS.
+Role: Defines Capability Models and Executors for NATS.
 Mandate: Mandate X (Infra as Data) & IV (Intent).
 Pattern: spec/patterns/10-infrastructure-capability-as-data.md
 Pattern: spec/patterns/04-execution-intent.md
 
 Constraint:
-- Intents are Complete Specifications (parameters + on_success/on_failure + catch_exceptions).
-- Defines Topology as pure Config models (StreamConfig).
-- No client libraries (no `nats-py`). Pure Data.
+- Capability Models mirror what NATS expects (interface contracts).
+- Executors are frozen Pydantic models that perform I/O and return Sum Types.
+- No exception catching in domain — infrastructure returns Sum Types.
 
 Example Implementation:
 ```python
 from pydantic import BaseModel
+from typing import Literal
 
-class ConnectIntent(BaseModel):
+# Capability Model (what NATS expects)
+class NatsStreamConfig(BaseModel):
+    model_config = {"frozen": True}
+    name: str
+    subjects: tuple[str, ...]
+    retention: Literal["limits", "interest", "workqueue"]
+    max_msgs: int
+    max_bytes: int
+
+# Result Sum Types (what infrastructure returns)
+class Connected(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["connected"]
+    client: object  # The actual NATS client
+
+class ConnectionFailed(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["connection_failed"]
+    error: str
+
+type ConnectResult = Connected | ConnectionFailed
+
+# Executor (frozen model with connect logic)
+class NatsConnector(BaseModel):
+    model_config = {"frozen": True}
     url: str
-    catch_exceptions: tuple[str, ...] = ("NoServersError", "TimeoutError")
 
-    def on_success(self, client_id: str) -> "Connected": ...
-    def on_failure(self, error: str) -> "ConnectionFailed": ...
+    async def connect(self) -> ConnectResult:
+        \"\"\"Infrastructure edge: performs I/O, returns Sum Type.\"\"\"
+        # Shell code here catches exceptions, returns Sum Type
+        ...
 ```
 """
