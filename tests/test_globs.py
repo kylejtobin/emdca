@@ -24,9 +24,7 @@ class TestRuleMatchesPath:
             if not rule.globs:
                 pytest.skip(f"Rule {rule.name} has no globs defined")
 
-    def test_domain_path_matches_domain_rule(
-        self, all_rules: tuple[Any, ...]
-    ) -> None:
+    def test_domain_path_matches_domain_rule(self, all_rules: tuple[Any, ...]) -> None:
         """A domain/** path should match rules with domain/** globs."""
         test_path = Path("domain/user/entity.py")
 

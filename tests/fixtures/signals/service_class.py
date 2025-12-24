@@ -7,4 +7,3 @@ class UserService:
 
 class PaymentManager:
     pass
-

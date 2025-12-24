@@ -28,4 +28,3 @@ class InactiveUser(BaseModel):
 
 
 type User = ActiveUser | InactiveUser
-

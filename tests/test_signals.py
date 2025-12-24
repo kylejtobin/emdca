@@ -86,7 +86,6 @@ class TestSignalContent:
                 actual_line = source_lines[signal.line - 1].strip()
                 # Either exact match or truncated with "..."
                 content_without_ellipsis = signal.content.removesuffix("...")
-                assert (
-                    signal.content in actual_line
-                    or actual_line.startswith(content_without_ellipsis)
+                assert signal.content in actual_line or actual_line.startswith(
+                    content_without_ellipsis
                 ), f"Signal content '{signal.content}' not in line '{actual_line}'"

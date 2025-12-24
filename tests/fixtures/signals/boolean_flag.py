@@ -6,4 +6,3 @@ from pydantic import BaseModel
 class User(BaseModel):
     is_active: bool
     is_verified: bool
-

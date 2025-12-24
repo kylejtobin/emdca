@@ -43,6 +43,7 @@ reportMissingTypeStubs = false
 python_version = "3.13"
 strict = true
 mypy_path = ".cursor/hooks"
+exclude = ["ref/"]
 
 [[tool.mypy.overrides]]
 module = "pytest"

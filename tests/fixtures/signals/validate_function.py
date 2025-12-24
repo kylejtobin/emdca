@@ -7,4 +7,3 @@ def validate_email(value: str) -> bool:
 
 def check_name(name: str) -> bool:
     return len(name) > 0
-
