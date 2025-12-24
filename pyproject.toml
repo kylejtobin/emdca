@@ -53,4 +53,4 @@ module = "conftest"
 disable_error_code = ["no-any-return", "untyped-decorator"]
 
 [dependency-groups]
-dev = ["pytest>=9.0.2"]
+dev = ["pytest>=9.0.2", "ruff>=0.8.0", "mypy>=1.14.0"]
