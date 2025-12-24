@@ -40,18 +40,113 @@ EMDCA fixes this structurally:
 
 ---
 
-## 🛡️ Automated Enforcement: "The Architect's Mirror"
+## 🔧 Cursor Agent Architecture
 
-EMDCA is not just a document; it is an active constraint system. This repository includes **The Architect's Mirror** (`.cursor/hooks/mirror.py`), a pure-Python AST analyzer that enforces the mandates in real-time.
+The `.cursor/` directory implements active enforcement for AI agents working in this codebase.
 
-It acts as a "Synthetic Supervisor" for both Human Developers and AI Agents, instantly flagging:
-- **Structural Violations**: Using `raise` or `await` in the Domain.
-- **Architectural Drift**: Importing external libraries (`boto3`) into the Pure Core.
-- **Procedural Habits**: Writing `Manager` classes instead of Aggregates.
+```
+.cursor/
+├── hooks.json              # Event configuration
+├── mirror-feedback.md      # ← SIGNALS WRITTEN HERE (agent reads this)
+├── hooks/
+│   └── mirror.py           # AST analyzer → writes to mirror-feedback.md
+└── rules/
+    ├── pattern-00-master-architecture/   # ← Instructs: "RUN mirror.py!"
+    ├── pattern-01-factory-construction/
+    ├── pattern-02-state-sum-types/
+    ├── pattern-03-railway-control-flow/
+    ├── pattern-04-execution-intent/
+    ├── pattern-05-config-injection/
+    ├── pattern-06-storage-foreign-reality/
+    ├── pattern-07-acl-translation/
+    ├── pattern-08-orchestrator-loop/
+    ├── pattern-09-workflow-state-machine/
+    └── pattern-10-infrastructure-capability/
+```
 
-The Mirror runs:
-1.  **Locally**: Inside Cursor via Hooks (`afterFileEdit`).
-2.  **Remotely**: In GitHub Actions (`.github/workflows/ci.yml`).
+### Rules (Passive Context)
+
+Each `pattern-*/RULE.md` contains:
+- **Frontmatter** with `globs` defining which files the rule applies to
+- **Type specifications** showing correct EMDCA patterns
+- **Anti-patterns** showing what to avoid
+
+The **master rule** (`pattern-00`) is `alwaysApply: true` and instructs the agent to run `mirror.py` after edits.
+
+### Hooks (Active Feedback via File)
+
+`hooks.json` configures:
+
+| Event | Trigger | Action |
+| :--- | :--- | :--- |
+| `afterFileEdit` | Agent saves a file | Write signals to `mirror-feedback.md` |
+| `stop` | Agent completes turn | Clear `mirror-feedback.md` |
+
+**Two Modes:**
+
+1. **Hook mode** (automatic): `afterFileEdit` triggers mirror.py → writes to `mirror-feedback.md`
+2. **CLI mode** (agent runs): `python3 .cursor/hooks/mirror.py <file>` → prints to stdout
+
+The master rule tells the agent to **run mirror.py manually** after edits. The agent sees violations directly in terminal output.
+
+```mermaid
+flowchart TB
+    subgraph Rules
+        R[pattern-00 RULE.md] -->|always apply| C[Agent Context]
+        R -->|instructs| I[RUN mirror.py!]
+    end
+    
+    subgraph Agent Action
+        Agent -->|runs| M[python3 mirror.py file.py]
+        M -->|stdout| O[Signals/Violations]
+        O --> Agent
+    end
+    
+    subgraph Backup Hook
+        E[File Edit] --> H[afterFileEdit hook]
+        H --> M2[mirror.py]
+        M2 -->|writes| F[mirror-feedback.md]
+    end
+```
+
+### Design Principle
+
+This combines **deterministic** (AST pattern matching) with **non-deterministic** (LLM judgment). The mirror detects mechanical signals; the rule instructs the agent to run it; the agent decides if they're violations in context.
+
+---
+
+## 🧪 Testing Philosophy
+
+EMDCA testing follows the same principles as the architecture itself:
+
+**Test Boundaries, Not Internals**
+```
+✅ Test: Does RawHookInput.to_domain() correctly parse JSON into Sum Types?
+❌ Skip: Does a frozen Pydantic model hold the values I put in it?
+```
+
+**No Mocks — Real Objects**
+```python
+# ❌ Traditional: Mock the dependency
+user = Mock()
+user.email = "not-validated"
+
+# ✅ EMDCA: Construct the real thing
+user = User(email=Email("real@email.com"), name=Name("Real"))
+```
+
+**Construction IS Validation**
+If you can construct a domain object, it's valid. Tests verify the parsing boundaries, not the type invariants.
+
+**Fixture Files = Expected Signals**
+```
+tests/fixtures/signals/
+├── try_block.py      # Should trigger 'try_block' signal
+├── raise_stmt.py     # Should trigger 'raise_stmt' signal
+└── await_expr.py     # Should trigger 'await_expr' signal
+```
+
+The filename IS the test assertion. No hardcoding.
 
 ---
 

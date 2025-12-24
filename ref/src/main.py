@@ -24,7 +24,7 @@ import os
 from api.app import AppFactory
 from api.deps import Clock
 from domain.system.env import EnvVars
-from service.nats import NatsConnector, Connected, ConnectionFailed
+from service.conversation import ConversationConnector, Connected, ConnectionFailed
 from service.conversation import ConversationOrchestrator, ConversationStore
 
 async def main():
@@ -39,7 +39,7 @@ async def main():
             pass
 
     # 2. Setup Infrastructure (Executor returns Sum Type)
-    connector = NatsConnector(url=config.nats_url)
+    connector = ConversationConnector(url=config.nats_url)
     connect_result = await connector.connect()
 
     match connect_result:

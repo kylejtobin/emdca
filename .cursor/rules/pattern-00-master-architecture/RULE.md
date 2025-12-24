@@ -4,6 +4,20 @@ globs: ["**/*.py"]
 alwaysApply: true
 ---
 
+# 🪞 THE MIRROR
+
+An architectural scanner runs **automatically after every file edit** via hooks. It writes findings to `.cursor/mirror-feedback.md`.
+
+**You should also run it yourself** to see violations directly:
+
+```bash
+python3 .cursor/hooks/mirror.py <path/to/file.py>
+```
+
+Check the mirror output. Fix violations before proceeding. This is your feedback loop — use it.
+
+---
+
 ## 🚨 CRITICAL (Most Violated Rules)
 
 **1. No `try/except`** — Models parse data, they don't catch exceptions.
@@ -120,7 +134,7 @@ class Executor(BaseModel):
 - **"Special case" is avoidance** — If it's hard to model correctly, you're avoiding the work
 - **Fix violations NOW** — Don't note for later. Don't hope no one notices. Fix it.
 - **Raise violations even if not asked** — See a problem? Say it. Always.
-- **Read code, don't assume from paths** — `domain/infra/` could be pure. Check.
+- **Read code, don't assume from paths** — File location doesn't guarantee compliance. Check.
 - **Think before typing** — Pause. Understand fully. Then respond.
 
 ---

@@ -19,6 +19,10 @@ class SendEmailIntent(BaseModel):
     body: str
     handled_failures: tuple[SmtpFailure, ...]  # NO DEFAULT
     
+    def is_handled(self, failure: SmtpFailure) -> bool:
+        """Check if a failure type is in the handled set."""
+        return failure in self.handled_failures
+    
     def on_sent(self, outcome: SmtpSent) -> EmailSent:
         return EmailSent(kind="email_sent", message_id=outcome.message_id, recipient=self.to)
     

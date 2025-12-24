@@ -33,10 +33,24 @@ indent-style = "space"
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
-include = ["ref/src"]
+include = ["ref/src", ".cursor/hooks", "tests"]
 exclude = ["**/__pycache__"]
+extraPaths = [".cursor/hooks"]
 reportMissingImports = true
 reportMissingTypeStubs = false
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = ".cursor/hooks"
+
+[[tool.mypy.overrides]]
+module = "pytest"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "conftest"
+disable_error_code = ["no-any-return", "untyped-decorator"]
 
 [dependency-groups]
 dev = ["pytest>=9.0.2"]
