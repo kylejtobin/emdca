@@ -3,7 +3,7 @@ THE INTERNAL TRUTH (Entity / Aggregate)
 
 Role: Defines the core business concepts and their valid states.
 Mandate: Mandate II (State) & I (Construction).
-Pattern: spec/patterns/02-state-sum-types.md
+Pattern: ref/patterns/02-state-sum-types.md
 
 Constraint:
 - All models MUST have model_config = {"frozen": True}.
@@ -21,7 +21,7 @@ class Active(BaseModel):
     model_config = {"frozen": True}
     kind: Literal["active"]
     conversation_id: str
-    
+
     def archive(self, reason: str) -> "Archived":
         return Archived(kind="archived", conversation_id=self.conversation_id, reason=reason)
 

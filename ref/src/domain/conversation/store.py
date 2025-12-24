@@ -3,7 +3,7 @@ THE STORE (Database Executor)
 
 Role: Frozen Pydantic model that handles DB I/O and returns Sum Types.
 Mandate: Mandate VI (Storage) & VII (Translation).
-Pattern: spec/patterns/06-storage-foreign-reality.md
+Pattern: ref/patterns/06-storage-foreign-reality.md
 
 Constraint:
 - Store is a frozen Pydantic model with DB connection as field.

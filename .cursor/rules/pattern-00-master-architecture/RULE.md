@@ -48,16 +48,16 @@ class Executor(BaseModel):
 
 ## ⚖️ The 10 Mandates
 
-1.  **Construction:** Parse, don't validate. ([Pattern 01](spec/patterns/01-factory-construction.md))
-2.  **State:** Sum Types. Make invalid states unrepresentable. ([Pattern 02](spec/patterns/02-state-sum-types.md))
-3.  **Control Flow:** Railway Oriented. No exceptions for logic. ([Pattern 03](spec/patterns/03-railway-control-flow.md))
-4.  **Execution:** Intent as Contract. ([Pattern 04](spec/patterns/04-execution-intent.md))
-5.  **Configuration:** EnvVars as Foreign Reality. ([Pattern 05](spec/patterns/05-config-injection.md))
-6.  **Storage:** DB as Foreign Reality. ([Pattern 06](spec/patterns/06-storage-foreign-reality.md))
-7.  **Translation:** Foreign Models with `to_domain()`. ([Pattern 07](spec/patterns/07-acl-translation.md))
-8.  **Coordination:** Dumb Orchestrator. ([Pattern 08](spec/patterns/08-orchestrator-loop.md))
-9.  **Workflow:** State Machine. ([Pattern 09](spec/patterns/09-workflow-state-machine.md))
-10. **Infrastructure:** Capability as Data. ([Pattern 10](spec/patterns/10-infrastructure-capability-as-data.md))
+1.  **Construction:** Parse, don't validate. ([Rule](.cursor/rules/pattern-01-factory-construction/RULE.md))
+2.  **State:** Sum Types. Make invalid states unrepresentable. ([Rule](.cursor/rules/pattern-02-state-sum-types/RULE.md))
+3.  **Control Flow:** Railway Oriented. No exceptions for logic. ([Rule](.cursor/rules/pattern-03-railway-control-flow/RULE.md))
+4.  **Execution:** Intent as Contract. ([Rule](.cursor/rules/pattern-04-execution-intent/RULE.md))
+5.  **Configuration:** EnvVars as Foreign Reality. ([Rule](.cursor/rules/pattern-05-config-injection/RULE.md))
+6.  **Storage:** DB as Foreign Reality. ([Rule](.cursor/rules/pattern-06-storage-foreign-reality/RULE.md))
+7.  **Translation:** Foreign Models with `to_domain()`. ([Rule](.cursor/rules/pattern-07-acl-translation/RULE.md))
+8.  **Coordination:** Dumb Orchestrator. ([Rule](.cursor/rules/pattern-08-orchestrator-loop/RULE.md))
+9.  **Workflow:** State Machine. ([Rule](.cursor/rules/pattern-09-workflow-state-machine/RULE.md))
+10. **Infrastructure:** Capability as Data. ([Rule](.cursor/rules/pattern-10-infrastructure-capability/RULE.md))
 
 ---
 
@@ -126,7 +126,5 @@ class Executor(BaseModel):
 ---
 
 ## Reference
-- Full spec: spec/arch.md
-- Patterns: spec/patterns/01-10
-- Examples: spec/src/
-- Agent translation: spec/agentic.md
+- Pattern rules: .cursor/rules/pattern-01 through pattern-10
+- Master rule: .cursor/rules/pattern-00-master-architecture/RULE.md

@@ -3,7 +3,7 @@ THE FOREIGN REALITY (API Contract)
 
 Role: Defines the schema of the HTTP Interface (Requests/Responses).
 Mandate: Mandate VII (Translation).
-Pattern: spec/patterns/07-acl-translation.md
+Pattern: ref/patterns/07-acl-translation.md
 
 Constraint:
 - Frozen Pydantic models defining the "Public" language.
@@ -17,7 +17,7 @@ class CreateMessageRequest(BaseModel):
     model_config = {"frozen": True}
     conversation_id: str
     content: str
-    
+
     def to_domain(self) -> "Message":
         return Message(
             conversation_id=ConversationId(self.conversation_id),

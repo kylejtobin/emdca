@@ -3,7 +3,7 @@ THE FOREIGN REALITY (EnvVars)
 
 Role: Models the chaotic OS Environment (strings, screaming snake case).
 Mandate: Mandate V (Configuration) & VII (Translation).
-Pattern: spec/patterns/05-config-injection.md
+Pattern: ref/patterns/05-config-injection.md
 
 Constraint:
 - Uses Field(alias=...) to map OS names.
@@ -33,7 +33,7 @@ class EnvVars(BaseModel):
     nats_url: str = Field(alias="NATS_URL")
     redis_url: str = Field(alias="REDIS_URL")
     debug_mode: str = Field(alias="DEBUG_MODE")
-    
+
     def to_config(self) -> ConfigResult:
         # Parse and validate, return Sum Type
         ...

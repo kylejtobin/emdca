@@ -4,11 +4,7 @@ version = "0.1.0"
 description = "Explicitly Modeled Data-Centric Architecture Reference"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
-    "pydantic>=2.12.5",
-    "uvicorn>=0.38.0",
-    "fastapi>=0.115.0",
-]
+dependencies = ["pydantic>=2.12.5", "uvicorn>=0.38.0", "fastapi>=0.115.0"]
 
 [tool.ruff]
 line-length = 88
@@ -31,18 +27,16 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.ruff.lint.per-file-ignores]
-"**/*.py" = ["E501"]  # assert allowed in tests
+"**/*.py" = ["E501"] # assert allowed in tests
 
 [tool.pyright]
 typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
-include = ["spec/src"]
+include = ["ref/src"]
 exclude = ["**/__pycache__"]
 reportMissingImports = true
 reportMissingTypeStubs = false
 
 [dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
+dev = ["pytest>=9.0.2"]

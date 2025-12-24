@@ -3,8 +3,8 @@ THE PURE LOGIC (Workflow / State Transitions)
 
 Role: Pure methods on frozen models that calculate next state or decision.
 Mandate: Mandate IX (Workflow) & IV (Intent).
-Pattern: spec/patterns/09-workflow-state-machine.md
-Pattern: spec/patterns/04-execution-intent.md
+Pattern: ref/patterns/09-workflow-state-machine.md
+Pattern: ref/patterns/04-execution-intent.md
 
 Constraint:
 - State transitions are methods on the SOURCE state model.

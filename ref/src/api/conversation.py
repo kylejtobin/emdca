@@ -3,7 +3,7 @@ THE ROUTER (Interface)
 
 Role: The HTTP Entrypoint for a specific Context.
 Mandate: Mandate VII (Translation).
-Pattern: spec/patterns/07-acl-translation.md
+Pattern: ref/patterns/07-acl-translation.md
 
 Constraint:
 - Receive (Foreign Model) -> Translate (.to_domain()) -> Delegate (Orchestrator) -> Return.
@@ -21,11 +21,11 @@ router = APIRouter()
 async def create_message(request: CreateMessageRequest, req: Request):
     # Translate foreign -> domain
     message = request.to_domain()
-    
+
     # Delegate to orchestrator (accessed from app state)
     orchestrator = req.app.state.orchestrator
     result = await orchestrator.process_message(message.id)
-    
+
     # Return (match on result Sum Type for response)
     match result:
         case MessageProcessed():

@@ -3,7 +3,7 @@ SHARED DEPENDENCIES (Runtime Providers)
 
 Role: Frozen Pydantic models that provide cross-cutting dependencies.
 Mandate: Mandate V (Injection).
-Structure: spec/structure.md
+Structure: ref/structure.md
 
 Constraint:
 - Providers are frozen Pydantic models with methods.
@@ -17,7 +17,7 @@ from datetime import datetime
 
 class Clock(BaseModel):
     model_config = {"frozen": True}
-    
+
     def now(self) -> datetime:
         return datetime.utcnow()
 

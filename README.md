@@ -1,6 +1,6 @@
 # EMDCA: Explicitly Modeled Data-Centric Architecture
 
-[![Architecture: EMDCA](https://img.shields.io/badge/Architecture-EMDCA-blueviolet)](spec/arch.md)
+[![Architecture: EMDCA](https://img.shields.io/badge/Architecture-EMDCA-blueviolet)](ref/arch.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python: 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Code Style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -36,7 +36,7 @@ EMDCA fixes this structurally:
 9.  **Workflow:** Process as State Machine. Transitions are methods on source state.
 10. **Infrastructure:** Capability as Data. Model what infrastructure expects.
 
-**→ Read the [Architecture Spec](spec/arch.md) for the principles, then the [Patterns](spec/patterns/) for implementation.**
+**→ Read the [Architecture Spec](ref/arch.md) for the principles, then the [Patterns](ref/patterns/) for implementation.**
 
 ---
 
@@ -60,11 +60,11 @@ The Mirror runs:
 | Document | What It Is |
 | :--- | :--- |
 | **[Manifesto](manifesto.md)** | The **Philosophy**. Why explicit modeling matters. |
-| **[Architecture Spec](spec/arch.md)** | The **Laws**. The 10 mandates in detail. |
-| **[Structure Guide](spec/structure.md)** | The **Map**. Vertical slice file organization. |
-| **[Patterns Library](spec/patterns/)** | The **Blueprints**. Idiomatic Python implementations. |
-| **[Agentic Systems](spec/agentic.md)** | The **Translation**. "Agent" buzzwords → real patterns. |
-| **[Reference Skeleton](spec/src/)** | The **Template**. A working starter structure. |
+| **[Architecture Spec](ref/arch.md)** | The **Laws**. The 10 mandates in detail. |
+| **[Structure Guide](ref/structure.md)** | The **Map**. Vertical slice file organization. |
+| **[Patterns Library](ref/patterns/)** | The **Blueprints**. Idiomatic Python implementations. |
+| **[Agentic Systems](ref/agentic.md)** | The **Translation**. "Agent" buzzwords → real patterns. |
+| **[Reference Skeleton](ref/src/)** | The **Template**. A working starter structure. |
 
 ---
 
@@ -72,12 +72,12 @@ The Mirror runs:
 
 **To Learn:** 
 1. Read this README for the overview
-2. Read the [Architecture Spec](spec/arch.md) for the principles
-3. Read the [Patterns](spec/patterns/) for implementation details
+2. Read the [Architecture Spec](ref/arch.md) for the principles
+3. Read the [Patterns](ref/patterns/) for implementation details
 
-**To Reference:** Copy `spec/` into your project. Use the patterns as a style guide.
+**To Reference:** Copy `ref/` into your project. Use the patterns as a style guide.
 
-**To Build:** Start from the [Reference Skeleton](spec/src/). Every file links back to the mandates.
+**To Build:** Start from the [Reference Skeleton](ref/src/). Every file links back to the mandates.
 
 **For AI Agents:** This repo is designed for you. The `.cursor/rules/` prime your context. The constraints act as guardrails—hallucinations become compilation errors.
 

@@ -3,8 +3,8 @@ THE ORCHESTRATOR (Service Layer)
 
 Role: Frozen Pydantic model that coordinates I/O and Logic.
 Mandate: Mandate VIII (Coordination).
-Pattern: spec/patterns/08-orchestrator-loop.md
-Pattern: spec/patterns/04-execution-intent.md
+Pattern: ref/patterns/08-orchestrator-loop.md
+Pattern: ref/patterns/04-execution-intent.md
 
 Constraint:
 - Orchestrator is a frozen Pydantic model with dependencies as FIELDS.

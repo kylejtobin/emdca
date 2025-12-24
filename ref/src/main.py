@@ -3,8 +3,8 @@ THE COMPOSITION ROOT (Launcher)
 
 Role: The Big Bang. Configures and starts the application.
 Mandate: Mandate V (Config) & VIII (Coordination) & X (Infrastructure).
-Pattern: spec/patterns/05-config-injection.md
-Pattern: spec/patterns/10-infrastructure-capability-as-data.md
+Pattern: ref/patterns/05-config-injection.md
+Pattern: ref/patterns/10-infrastructure-capability-as-data.md
 
 Flow:
 1. Load Env (Foreign) -> Config (Domain) via Sum Type result.
@@ -31,7 +31,7 @@ async def main():
     # 1. Translate Config (Sum Type result)
     raw = os.environ
     config_result = EnvVars.model_validate(raw).to_config()
-    
+
     match config_result:
         case ConfigInvalid(errors=e):
             sys.exit(f"Config invalid: {e}")

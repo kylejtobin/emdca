@@ -3,7 +3,7 @@ THE UBIQUITOUS LANGUAGE (Primitives)
 
 Role: Universal Value Objects used across multiple contexts.
 Mandate: Mandate I (Construction) - "Primitive Obsession is Forbidden".
-Pattern: spec/patterns/01-factory-construction.md
+Pattern: ref/patterns/01-factory-construction.md
 
 Constraint:
 - Use Pydantic built-in types (EmailStr, PositiveInt, HttpUrl) over hand-rolled validators.

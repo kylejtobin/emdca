@@ -3,7 +3,7 @@ THE INTERNAL TRUTH (AppConfig)
 
 Role: Defines the structured, type-safe configuration for the application.
 Mandate: Mandate V (Configuration).
-Pattern: spec/patterns/05-config-injection.md
+Pattern: ref/patterns/05-config-injection.md
 
 Constraint:
 - Must be frozen (immutable).
