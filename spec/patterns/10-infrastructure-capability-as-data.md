@@ -1,14 +1,14 @@
 # Pattern 10: Infrastructure (Capability as Data)
 
 ## The Principle
-Infrastructure has a shape. Model it. What a stream looks like, what a bucket requires, what an agent configuration expects—these are **interface contracts** the Domain owns as Pydantic models. The Shell resolves these models against real infrastructure.
+Domain contexts define abstract capabilities they need (event persistence, object storage). The Service layer binds those capabilities to specific technologies. The Domain never knows it's using NATS, S3, or Redis—it only knows it needs to persist events or store objects.
 
 ## The Mechanism
-1. **Capability Models:** Pydantic models mirror what infrastructure systems expect (stream configs, bucket policies, agent topologies)
-2. **Failure Models:** Smart Enums enumerate how infrastructure can fail
-3. **Shell Resolution:** The Shell reads capability models and provisions real infrastructure
+1. **Domain Capabilities:** Abstract models declaring what the domain needs (EventStore, ObjectStore)
+2. **Domain Failure Models:** Smart Enums enumerating how operations can fail (abstract, not tech-specific)
+3. **Service Binding:** Service layer defines technology-specific configs and executors
 
-The Domain never imports infrastructure libraries. It declares the shape of what should exist.
+The Domain never imports infrastructure libraries. It declares abstract needs.
 
 ---
 
@@ -26,79 +26,93 @@ class StorageService:
 
 ---
 
-## ✅ Pattern: Capability Model (Messaging)
+## ❌ Anti-Pattern: Technology Config in Domain
 
-Model what the messaging system expects.
+Technology-specific configuration is infrastructure knowledge, not domain knowledge.
 
 ```python
+# ❌ WRONG: This is NATS knowledge, not domain knowledge
+# domain/infra/nats.py  <-- This file should not exist
 class NatsStreamConfig(BaseModel):
-    """Models what NATS expects when creating a stream."""
+    name: str
+    subjects: tuple[str, ...]
+    retention: Literal["limits", "interest", "workqueue"]  # NATS concept
+```
+
+---
+
+## ✅ Pattern: Abstract Domain Capability
+
+The domain declares WHAT it needs, not HOW infrastructure provides it.
+
+```python
+# domain/event/store.py
+class EventStore(BaseModel):
+    """Abstract capability: I need event persistence."""
+    model_config = {"frozen": True}
+    
+    async def append(self, event: Event) -> AppendResult:
+        """Append event. Implementation injected."""
+        ...
+
+    async def read(self, stream: str) -> ReadResult:
+        """Read events. Implementation injected."""
+        ...
+```
+
+---
+
+## ✅ Pattern: Abstract Failure Model
+
+Model how operations can fail in abstract terms. The Shell maps technology exceptions to these.
+
+```python
+# domain/event/failure.py
+class EventStoreFailure(StrEnum):
+    """How event operations can fail (abstract)."""
+    TIMEOUT = "timeout"
+    CONNECTION_LOST = "connection_lost"
+    NOT_FOUND = "not_found"
+    PERMISSION_DENIED = "permission_denied"
+```
+
+---
+
+## ✅ Pattern: Technology Binding in Service
+
+The service layer owns technology knowledge. It binds abstract capabilities to concrete implementations.
+
+```python
+# service/event.py
+from domain.event.store import EventStore
+from domain.event.failure import EventStoreFailure
+
+# Technology-specific config lives HERE, not in domain
+class NatsStreamConfig(BaseModel):
+    """What NATS expects. This is service-layer knowledge."""
     model_config = {"frozen": True}
     
     name: str
     subjects: tuple[str, ...]
     retention: Literal["limits", "interest", "workqueue"]
-```
 
----
-
-## ✅ Pattern: Capability Model (Storage)
-
-Model what the storage system expects.
-
-```python
-class S3BucketConfig(BaseModel):
-    """Models what S3 expects when creating a bucket."""
+class NatsEventExecutor(BaseModel):
+    """Binds abstract EventStore to NATS."""
     model_config = {"frozen": True}
     
-    name: str
-    region: str
-    versioning: Literal["enabled", "suspended"]
-```
-
----
-
-## ✅ Pattern: Failure Model
-
-Model how infrastructure can fail. The Domain declares failure modes; the Shell maps them to real exceptions.
-
-```python
-class InfraFailure(StrEnum):
-    """How infrastructure can fail."""
-    TIMEOUT = "timeout"
-    CONNECTION_CLOSED = "connection_closed"
-    NOT_FOUND = "not_found"
-    PERMISSION_DENIED = "permission_denied"
-    # ...
-```
-
----
-
-## ✅ Pattern: Capability in Intent
-
-Capability models feed into Intents (Pattern 04). The Intent references the capability; execution is separate.
-
-```python
-class EnsureStreamIntent(BaseModel):
-    """Intent that uses a capability model."""
-    model_config = {"frozen": True}
-    kind: Literal["ensure_stream"]
+    config: NatsStreamConfig
     
-    config: NatsStreamConfig  # Capability model
-    handled_failures: tuple[InfraFailure, ...]  # Failure model
+    async def execute(self, intent: EventIntent) -> EventStoreFailure | EventResult:
+        # Map NATS exceptions to abstract failures
+        ...
 ```
-
----
-
-## Shell Resolution
-
-The Shell receives capability models and provisions real infrastructure. Execution follows Pattern 04—the Shell composes models, never catches exceptions in domain logic.
 
 ---
 
 ## Cognitive Checks
 
-- [ ] **No Libraries in Domain:** Did I remove `import boto3` from the `domain/` folder?
-- [ ] **Capability is a Model:** Is infrastructure shape a `BaseModel`, not a plain dict?
-- [ ] **Failures are Enumerated:** Is failure a `StrEnum`, not raw strings?
-- [ ] **No Default Values:** Are all fields explicit at construction?
+- [ ] **No Libraries in Domain:** Did I remove `import boto3` / `import nats` from `domain/`?
+- [ ] **No Tech Configs in Domain:** Is `NatsStreamConfig` / `S3BucketConfig` in `service/`, not `domain/`?
+- [ ] **Domain is Abstract:** Does domain only declare capabilities (EventStore), not tech bindings?
+- [ ] **Failures are Abstract:** Are failure modes tech-agnostic (timeout, not NatsTimeout)?
+- [ ] **Service Binds:** Does the service layer own the technology-specific configuration?

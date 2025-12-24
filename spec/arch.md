@@ -196,11 +196,11 @@ This document contains the non-negotiable engineering standards for the system. 
 
 ### **X. The Infrastructure Mandate: Capability as Data**
 
-**The Principle:** Infrastructure has a shape. Model it. The Domain defines the *Topology* as pure Pydantic models, while the Shell handles the *Runtime Connection*.
+**The Principle:** Infrastructure has a shape. Model it. Domain contexts define abstract capabilities they need. The Service layer binds those capabilities to specific technologies.
 
 #### **MUST USE:**
 
-* **Capability Models:** Frozen Pydantic models that mirror what infrastructure systems expect (stream configs, bucket policies).
+* **Capability Models:** Domain contexts define abstract capabilities (event persistence, object storage). Technology-specific configurations belong in the service layer.
 * **Failure Models:** Smart Enums (`StrEnum`) that enumerate how infrastructure can fail.
 * **Capability in Intent:** Intents reference capability models; execution is separate.
 

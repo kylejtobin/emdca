@@ -64,7 +64,7 @@ The Mirror runs:
 | **[Structure Guide](spec/structure.md)** | The **Map**. Vertical slice file organization. |
 | **[Patterns Library](spec/patterns/)** | The **Blueprints**. Idiomatic Python implementations. |
 | **[Agentic Systems](spec/agentic.md)** | The **Translation**. "Agent" buzzwords → real patterns. |
-| **[Reference Skeleton](spec/skeleton.md)** | The **Template**. A working starter structure. |
+| **[Reference Skeleton](spec/src/)** | The **Template**. A working starter structure. |
 
 ---
 
@@ -77,7 +77,7 @@ The Mirror runs:
 
 **To Reference:** Copy `spec/` into your project. Use the patterns as a style guide.
 
-**To Build:** Start from the [Reference Skeleton](spec/skeleton.md). Every file links back to the mandates.
+**To Build:** Start from the [Reference Skeleton](spec/src/). Every file links back to the mandates.
 
 **For AI Agents:** This repo is designed for you. The `.cursor/rules/` prime your context. The constraints act as guardrails—hallucinations become compilation errors.
 

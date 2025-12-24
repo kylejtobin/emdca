@@ -19,13 +19,9 @@ src/
 │   │   ├── store.py         # Foreign Reality (Database Schema)
 │   │   └── workflow.py      # Aggregates with decision methods
 │   │
-│   ├── system/              # Context: System Capabilities
-│   │   ├── config.py        # Internal Truth (AppConfig, ConfigResult)
-│   │   └── env.py           # Foreign Reality (EnvVars)
-│   │
-│   └── infra/               # Context: Infrastructure Intents
-│       ├── nats.py          # Intents: ConnectIntent, PublishIntent
-│       └── redis.py         # Intents: GetIntent, SetIntent
+│   └── system/              # Context: System Capabilities
+│       ├── config.py        # Internal Truth (AppConfig, ConfigResult)
+│       └── env.py           # Foreign Reality (EnvVars)
 │
 ├── service/                 # THE SHELL (Orchestration & Execution)
 │   ├── context_1.py         # Orchestrator/Executor models for Context 1

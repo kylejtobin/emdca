@@ -24,7 +24,7 @@ import os
 from api.app import AppFactory
 from api.deps import Clock
 from domain.system.env import EnvVars
-from domain.infra.nats import NatsConnector, Connected, ConnectionFailed
+from service.nats import NatsConnector, Connected, ConnectionFailed
 from service.conversation import ConversationOrchestrator, ConversationStore
 
 async def main():
