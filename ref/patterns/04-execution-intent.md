@@ -37,15 +37,21 @@ class SmtpFailure(StrEnum):
     RECIPIENT_REJECTED = "recipient_rejected"
     # ...
 
+class InfraResultKind(StrEnum):
+    SUCCESS = "client_success"
+    ERROR = "client_error"
+    SMTP_SENT = "smtp_sent"
+    SMTP_FAILED = "smtp_failed"
+
 # Client-level outcomes (Sum Type)
 class SmtpClientSuccess(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["client_success"]
-    message_id: str
+    kind: Literal[InfraResultKind.SUCCESS]
+    message_id: MessageId
 
 class SmtpClientError(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["client_error"]
+    kind: Literal[InfraResultKind.ERROR]
     failure: SmtpFailure
     detail: SmtpErrorDetail  # SmtpErrorWithCode | SmtpErrorNoCode
 
@@ -54,31 +60,36 @@ type SmtpClientOutcome = SmtpClientSuccess | SmtpClientError
 # Infrastructure outcomes (what Intent interprets)
 class SmtpSent(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["smtp_sent"]
-    message_id: str
+    kind: Literal[InfraResultKind.SMTP_SENT]
+    message_id: MessageId
 
 class SmtpFailed(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["smtp_failed"]
+    kind: Literal[InfraResultKind.SMTP_FAILED]
     failure: SmtpFailure
 
 # Executor-level outcomes (final result)
+class EmailResultKind(StrEnum):
+    SENT = "email_sent"
+    FAILED = "email_failed"
+    UNHANDLED = "email_unhandled"
+
 class EmailSent(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["email_sent"]
-    message_id: str
-    recipient: EmailStr
+    kind: Literal[EmailResultKind.SENT]
+    message_id: MessageId
+    recipient: Email
 
 class EmailFailed(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["email_failed"]
-    recipient: EmailStr
+    kind: Literal[EmailResultKind.FAILED]
+    recipient: Email
     failure: SmtpFailure
 
 class EmailUnhandled(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["email_unhandled"]
-    recipient: EmailStr
+    kind: Literal[EmailResultKind.UNHANDLED]
+    recipient: Email
     failure: SmtpFailure
 
 type EmailResult = EmailSent | EmailFailed | EmailUnhandled
@@ -91,21 +102,25 @@ type EmailResult = EmailSent | EmailFailed | EmailUnhandled
 The Intent carries execution parameters AND outcome interpretation. The Domain decides what failures it handles gracefully.
 
 ```python
+class IntentKind(StrEnum):
+    SEND_EMAIL = "send_email"
+    NO_OP = "no_op"
+
 class SendEmailIntent(BaseModel):
     """Complete specification: what to do AND how to interpret results."""
     model_config = {"frozen": True}
-    kind: Literal["send_email"]
+    kind: Literal[IntentKind.SEND_EMAIL]
     
-    to: EmailStr
-    subject: str
-    body: str
+    to: Email
+    subject: EmailSubject
+    body: EmailBody
     handled_failures: tuple[SmtpFailure, ...]  # NO DEFAULT—explicit
     
     def on_sent(self, outcome: SmtpSent) -> EmailSent:
-        return EmailSent(kind="email_sent", message_id=outcome.message_id, recipient=self.to)
+        return EmailSent(kind=EmailResultKind.SENT, message_id=outcome.message_id, recipient=self.to)
     
     def on_failed(self, outcome: SmtpFailed) -> EmailFailed:
-        return EmailFailed(kind="email_failed", recipient=self.to, failure=outcome.failure)
+        return EmailFailed(kind=EmailResultKind.FAILED, recipient=self.to, failure=outcome.failure)
     
     def is_handled(self, failure: SmtpFailure) -> bool:
         return failure in self.handled_failures
@@ -114,8 +129,8 @@ class SendEmailIntent(BaseModel):
 class NoOp(BaseModel):
     """Domain decided no action needed."""
     model_config = {"frozen": True}
-    kind: Literal["no_op"]
-    reason: str  # NO DEFAULT—must be explicit
+    kind: Literal[IntentKind.NO_OP]
+    reason: NoOpReason  # NO DEFAULT—must be explicit
 
 
 type SignupDecision = SendEmailIntent | NoOp
@@ -126,20 +141,20 @@ The Aggregate returns the Intent:
 ```python
 class User(BaseModel):
     model_config = {"frozen": True}
-    id: str
-    email: EmailStr
+    id: UserId
+    email: Email
     is_vip: bool
     
     def decide_signup_action(self) -> SignupDecision:
         if self.is_vip:
             return SendEmailIntent(
-                kind="send_email",
+                kind=IntentKind.SEND_EMAIL,
                 to=self.email,
-                subject="Welcome VIP",
-                body="...",
+                subject=EmailSubject.WELCOME_VIP,
+                body=EmailBody.VIP_TEMPLATE,
                 handled_failures=(SmtpFailure.CONNECTION_FAILED, SmtpFailure.TIMEOUT),
             )
-        return NoOp(kind="no_op", reason="Non-VIP user")
+        return NoOp(kind=IntentKind.NO_OP, reason=NoOpReason.NON_VIP)
 ```
 
 ---
@@ -149,15 +164,19 @@ class User(BaseModel):
 Raw infrastructure results are captured as data—never as exceptions. Each outcome variant is explicit.
 
 ```python
+class RawSmtpResultKind(StrEnum):
+    SUCCESS = "raw_success"
+    CONNECT_ERROR = "connect_error"
+
 class RawSmtpSuccess(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["raw_success"]
-    message_id: str
+    kind: Literal[RawSmtpResultKind.SUCCESS]
+    message_id: MessageId
 
 class RawSmtpConnectError(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["connect_error"]
-    message: str
+    kind: Literal[RawSmtpResultKind.CONNECT_ERROR]
+    message: ErrorMessage
 
 # ... other failure variants: timeout, recipients_refused, response_error, unknown
 
@@ -178,7 +197,7 @@ class SmtpConnectErrorForeign(BaseModel):
     
     def to_domain(self) -> SmtpClientError:
         return SmtpClientError(
-            kind="client_error",
+            kind=InfraResultKind.ERROR,
             failure=SmtpFailure.CONNECTION_FAILED,
             detail=SmtpErrorNoCode(kind="no_code", message=self.message),
         )
@@ -187,7 +206,7 @@ class SmtpConnectErrorForeign(BaseModel):
 class RawSmtpConnectError(BaseModel):
     """Raw data from infrastructure edge."""
     model_config = {"frozen": True}
-    kind: Literal["connect_error"]
+    kind: Literal[RawSmtpResultKind.CONNECT_ERROR]
     message: str
     
     def to_foreign(self) -> SmtpConnectErrorForeign:
@@ -203,12 +222,11 @@ Usage: `raw.to_foreign().to_domain()` — pure model composition.
 The Executor composes models. It receives raw data, parses through the Foreign Model chain, and interprets via the Intent. No try/except—just pattern matching.
 
 ```python
-class SmtpClient(BaseModel):
-    model_config = {"frozen": True}
-    host: str
-    port: int
-    
-    def parse(self, raw: RawSmtpResult) -> SmtpClientOutcome:
+# Pure Helper Module (Stateless)
+class SmtpParser:
+    """Pure functions for parsing raw results."""
+    @staticmethod
+    def parse(raw: RawSmtpResult) -> SmtpClientOutcome:
         match raw:
             case RawSmtpSuccess():
                 return raw.to_foreign().to_domain()
@@ -216,23 +234,24 @@ class SmtpClient(BaseModel):
                 return raw.to_foreign().to_domain()
             # ... other variants
 
-
-class EmailExecutor(BaseModel):
-    model_config = {"frozen": True}
-    client: SmtpClient
+class EmailExecutor:
+    """Service Layer: Worker with Tools. NOT a Model."""
+    def __init__(self, config: SmtpConfig):
+        self.config = config
     
     def execute(self, intent: SendEmailIntent, raw: RawSmtpResult) -> EmailResult:
-        outcome = self.client.parse(raw)
+        # Pure Transformation: Raw -> Domain Outcome
+        outcome = SmtpParser.parse(raw)
         
         match outcome:
             case SmtpClientSuccess(message_id=mid):
-                return intent.on_sent(SmtpSent(kind="smtp_sent", message_id=mid))
+                return intent.on_sent(SmtpSent(kind=InfraResultKind.SMTP_SENT, message_id=mid))
             
             case SmtpClientError(failure=f) if intent.is_handled(f):
-                return intent.on_failed(SmtpFailed(kind="smtp_failed", failure=f))
+                return intent.on_failed(SmtpFailed(kind=InfraResultKind.SMTP_FAILED, failure=f))
             
             case SmtpClientError(failure=f):
-                return EmailUnhandled(kind="email_unhandled", recipient=intent.to, failure=f)
+                return EmailUnhandled(kind=EmailResultKind.UNHANDLED, recipient=intent.to, failure=f)
 ```
 
 ---
@@ -257,18 +276,22 @@ type DispatchRequest = ExecutableEmail | NoOp  # Not raw | None
 ## Composition Root
 
 ```python
-client = SmtpClient(host="smtp.example.com", port=587)
-executor = EmailExecutor(client=client)
+# Configuration (Data)
+config = SmtpConfig(host="smtp.example.com", port=587)
+executor = EmailExecutor(config=config)
 
-# At runtime:
+# Runtime Loop
 decision = user.decide_signup_action()
 
 match decision:
-    case NoOp() as no_op:
-        result = no_op
+    case NoOp():
+        pass
     case SendEmailIntent() as intent:
-        raw: RawSmtpResult = ...  # From infrastructure edge
-        result = executor.execute(intent, raw)
+        # 1. I/O (Infrastructure)
+        raw_result = smtp_adapter.send(intent, config) 
+        
+        # 2. Interpretation (Pure Executor)
+        final_result = executor.execute(intent, raw_result)
 ```
 
 ---
@@ -281,3 +304,5 @@ match decision:
 - [ ] **No Optionality:** Sum Types replace `| None`
 - [ ] **Foreign Model Chain:** `raw.to_foreign().to_domain()`
 - [ ] **Executor Pattern-Matches:** No `isinstance()`, no `raise`
+- [ ] **Types Over Strings:** Am I using `Email`, `MessageId`, `NoOpReason`?
+- [ ] **Smart Enums:** Am I using `IntentKind` and `ResultKind`?

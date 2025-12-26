@@ -31,14 +31,14 @@ class DbOrder(BaseModel):
     """Foreign Model: Represents the 'orders' table."""
     model_config = {"frozen": True}
     
-    id: str
-    status: str
+    id: OrderId
+    status: OrderStatus
     amount_cents: int
     
     def to_domain(self) -> Order:
         return Order(
-            id=OrderId(self.id),
-            status=OrderStatus(self.status),
+            id=self.id,
+            status=self.status,
             amount=Money.from_cents(self.amount_cents),
         )
 ```
@@ -50,17 +50,21 @@ Model the query result explicitly—found or not found.
 
 ### ✅ Pattern: Explicit Result
 ```python
-from typing import Literal
+from enum import StrEnum
+
+class StorageResultKind(StrEnum):
+    FOUND = "found"
+    NOT_FOUND = "not_found"
 
 class OrderFound(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["found"]
+    kind: Literal[StorageResultKind.FOUND]
     order: Order
 
 class OrderNotFound(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["not_found"]
-    order_id: str
+    kind: Literal[StorageResultKind.NOT_FOUND]
+    order_id: OrderId
 
 type FetchOrderResult = OrderFound | OrderNotFound
 ```
@@ -68,57 +72,54 @@ type FetchOrderResult = OrderFound | OrderNotFound
 ---
 
 ## 4. The Store Executor
-The Store is a frozen Pydantic model that handles DB I/O. It's injected into orchestrators.
 
-### ✅ Pattern: Store as Executor
+The "Store" is a Service Layer concept (Interpreter), not a Domain concept. It executes Load/Save Intents.
+
+### ✅ Pattern: Intent-Based Execution
 ```python
-class OrderStore(BaseModel):
-    """Executor for order persistence. Injected into orchestrators."""
-    model_config = {"frozen": True}
+# service/order.py (NOT domain)
+class OrderExecutor:
+    """Service Class: Wiring and Execution."""
+    def __init__(self, table_name: TableName):
+        self.table_name = table_name
     
-    async def fetch(self, order_id: str, db: AsyncSession) -> FetchOrderResult:
-        result = await db.execute(select(orders_table).where(id=order_id))
+    async def execute_load(self, intent: LoadOrderIntent, db: AsyncSession) -> FetchOrderResult:
+        # 1. Raw I/O
+        result = await db.execute(select(self.table_name).where(id=intent.order_id))
         row = result.first()
         
+        # 2. Pure Translation
         if not row:
-            return OrderNotFound(kind="not_found", order_id=order_id)
-        
-        db_order = DbOrder.model_validate(row)
-        order = db_order.to_domain()
-        return OrderFound(kind="found", order=order)
-    
-    async def save_status(self, order_id: str, status: OrderStatus, db: AsyncSession) -> None:
-        await db.execute(
-            orders_table.update()
-            .where(id=order_id)
-            .values(status=status.value)
+            return OrderNotFound(kind=StorageResultKind.NOT_FOUND, order_id=intent.order_id)
+            
+        return OrderFound(
+            kind=StorageResultKind.FOUND, 
+            order=DbOrder.model_validate(row).to_domain()
         )
 ```
 
 ---
 
-## 5. The Orchestrator (Pydantic Model)
-The Orchestrator declares its dependencies as fields. Application-scoped dependencies are injected; request-scoped resources (like `db`) are passed as arguments.
+## 5. The Orchestrator (Service Class)
 
-### ✅ Pattern: Dependencies as Fields
+The Orchestrator coordinates the flow: Intent -> Executor -> Result.
+
+### ✅ Pattern: Reactive Data Flow
 ```python
-class OrderProcessor(BaseModel):
-    """Orchestrator with injected store."""
-    model_config = {"frozen": True}
+class OrderProcessor:
+    """Service Class: Orchestration."""
+    def __init__(self, executor: OrderExecutor):
+        self.executor = executor
     
-    store: OrderStore  # Injected dependency
-    
-    async def process(self, order_id: str, db: AsyncSession) -> ProcessResult:
-        fetch_result = await self.store.fetch(order_id, db)
+    async def process(self, intent: LoadOrderIntent, db: AsyncSession) -> ProcessResult:
+        # 1. Execute Load Intent
+        fetch_result = await self.executor.execute_load(intent, db)
         
         match fetch_result:
-            case OrderNotFound():
-                return fetch_result
-            
             case OrderFound(order=order):
-                intent = order.mark_shipped()
-                await self.store.save_status(order_id, intent.new_status, db)
-                return OrderProcessed(kind="processed", order_id=order_id)
+                return ProcessSuccess(order=order)
+            case OrderNotFound():
+                return ProcessFailure("Not Found")
 ```
 
 ---
@@ -136,5 +137,6 @@ By removing the Repository Class:
 - [ ] **No SQL in Domain:** The Domain defines the shape, never imports `sqlalchemy`.
 - [ ] **Explicit Translation:** Does it read `DbOrder.model_validate(row).to_domain()`?
 - [ ] **No Implicit None:** Is "not found" an explicit `OrderNotFound` type?
-- [ ] **Store as Executor:** Is the store a `BaseModel` with I/O methods?
-- [ ] **Dependencies as Fields:** Does the orchestrator have `store: OrderStore` as a field?
+- [ ] **Store as Executor:** Is the store in `service/` not `domain/`?
+- [ ] **Domain is Passive:** Does the Domain describe data, not fetch it?
+- [ ] **Smart Enums:** Am I using `StorageResultKind` instead of literal "found"?

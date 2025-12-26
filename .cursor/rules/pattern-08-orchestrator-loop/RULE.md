@@ -9,62 +9,67 @@ alwaysApply: false
 ## Valid Code Structure
 
 ```python
-# Result Types
+# Result Types (Smart Enum)
+class PaymentResultKind(StrEnum):
+    NOT_FOUND = "not_found"
+    PROCESSED = "processed"
+    VERIFICATION_REQUIRED = "verification_required"
+
 class PaymentNotFound(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["not_found"]  # NO DEFAULT
-    payment_id: str
+    kind: Literal[PaymentResultKind.NOT_FOUND]
+    payment_id: PaymentId
 
 class PaymentProcessed(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["processed"]  # NO DEFAULT
-    payment_id: str
+    kind: Literal[PaymentResultKind.PROCESSED]
+    payment_id: PaymentId
 
 class VerificationRequired(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["verification_required"]  # NO DEFAULT
-    reason: str
+    kind: Literal[PaymentResultKind.VERIFICATION_REQUIRED]
+    reason: VerificationReason
 
 type ProcessPaymentResult = PaymentNotFound | PaymentProcessed | VerificationRequired
 
-# Orchestrator: Frozen model with dependencies as fields
-class PaymentOrchestrator(BaseModel):
-    model_config = {"frozen": True}
-    
-    store: PaymentStore       # Injected dependency
-    gateway: PaymentGateway   # Injected dependency
-    
-    def process(self, payment_id: str, db: Session) -> ProcessPaymentResult:
-        # 1. Fetch (via injected store)
-        fetch_result = self.store.fetch(payment_id, db)
+# Service Class: The Runtime (Orchestrator)
+class PaymentRuntime:
+    """
+    The Runtime drives the process.
+    It loads state, steps the machine, saves state, and executes intents.
+    It contains NO business logic.
+    """
+    def __init__(self, executor: PaymentExecutor):
+        self.executor = executor
+
+    def run(self, payment_id: PaymentId, event: PaymentEvent) -> ProcessPaymentResult:
+        # 1. Load State (I/O)
+        state = self.executor.load(payment_id)
+        if not state:
+            return PaymentNotFound(kind=PaymentResultKind.NOT_FOUND, payment_id=payment_id)
+
+        # 2. Pure Step (Domain Logic)
+        # The Domain decides what happens next.
+        new_state, intent = state.handle(event)
+
+        # 3. Save State (I/O)
+        self.executor.save(payment_id, new_state)
+
+        # 4. Execute Intent (Side Effect)
+        # The Domain decided WHAT to do; the Runtime does it.
+        self.executor.execute(intent)
         
-        match fetch_result:
-            case PaymentNotFound():
-                return fetch_result
-            
-            case PaymentFound(payment=payment):
-                # 2. Decide (Pure Domain—method on aggregate)
-                intent = payment.decide_action()
-                
-                # 3. Act (via injected dependencies)
-                match intent:
-                    case ProcessIntent(new_state=s):
-                        self.gateway.charge(s.amount)
-                        self.store.save(s, db)
-                        return PaymentProcessed(kind="processed", payment_id=payment_id)
-                    
-                    case RequireVerificationIntent(reason=r):
-                        return VerificationRequired(kind="verification_required", reason=r)
+        return PaymentProcessed(kind=PaymentResultKind.PROCESSED, payment_id=payment_id)
 ```
 
 ## Constraints
 
 | Required | Forbidden |
 |----------|-----------|
-| Orchestrator is frozen `BaseModel` | Standalone `def process_payment()` functions |
-| Dependencies as fields (stores, gateways) | Stateless orchestrator with no fields |
-| Dumb piping: Fetch → Translate → Decide → Act | `if payment.amount > 10000` (business logic) |
+| **Runtime is a Service Class** | **Runtime is a Pydantic Model** |
+| Logic delegated to Domain `state.handle()` | Logic inside `run()` |
+| **Reactive Loop Pattern** | **Procedural Script Pattern** |
+| Explicit Dependencies (`executor`) | Implicit Globals |
 | `match/case` for flow control | `raise` for control flow |
-| Decision logic in domain aggregates | Decision logic in orchestrator |
-| Return Sum Types | `return None` or implicit returns |
-
+| **Smart Enums for Result Kinds** | **Magic Strings for Result Kinds** |
+| **Typed IDs (PaymentId)** | **String IDs (str)** |

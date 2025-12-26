@@ -1,10 +1,10 @@
 # Pattern 08: Coordination (The Orchestrator)
 
 ## The Principle
-A system needs a "driver" that does no thinking, only moving. It coordinates the flow of data between models and execution shell.
+A system needs a "driver" that does no thinking, only moving. It coordinates the flow of data between models and execution shell. We call this the **Runtime** or **Orchestrator**.
 
 ## The Mechanism
-The **Orchestrator** is a frozen Pydantic model with a coordination method. It runs a "dumb" procedural loop: Fetch → Translate → Decide → Act → Persist. It contains no business rules, only flow control.
+The **Runtime** is a Service Class (not a Model). It runs a "dumb" reactive loop: Load → Step → Save → Execute. It contains no business rules, only flow control.
 
 ---
 
@@ -22,86 +22,70 @@ def process_payment(payment_id: str, db: Session):  # ❌ Standalone function
 
 ---
 
-## 2. The Orchestrator Model
-The Orchestrator is a frozen Pydantic model with **dependencies as fields**. Application-scoped dependencies (stores, gateways) are injected; request-scoped resources (sessions) are passed as arguments.
+## 2. The Runtime (Service Class)
 
-### ✅ Pattern: Dependencies as Fields
+The Runtime drives the State Machine. It does not decide; it merely executes the Domain's decisions.
+
+### ✅ Pattern: The Reactive Loop
 ```python
-from typing import Literal
-from pydantic import BaseModel
+from enum import StrEnum
 
-class PaymentNotFound(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal["not_found"]
-    payment_id: str
+class PaymentResultKind(StrEnum):
+    NOT_FOUND = "not_found"
+    PROCESSED = "processed"
 
-class PaymentProcessed(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal["processed"]
-    payment_id: str
-
-class VerificationRequired(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal["verification_required"]
-    reason: str
-
-type ProcessPaymentResult = PaymentNotFound | PaymentProcessed | VerificationRequired
-
-
-class PaymentOrchestrator(BaseModel):
-    """Dumb orchestrator—coordinates but does not decide."""
-    model_config = {"frozen": True}
+class PaymentRuntime:
+    """Service Class: Wiring only."""
     
-    store: PaymentStore      # Injected: handles DB I/O
-    gateway: PaymentGateway  # Injected: handles external payment API
+    def __init__(self, executor: PaymentExecutor):
+        self.executor = executor
     
-    def process(self, payment_id: str, db: Session) -> ProcessPaymentResult:
-        # 1. Fetch (via injected store)
-        fetch_result = self.store.fetch(payment_id, db)
+    def run(self, payment_id: PaymentId, event: PaymentEvent) -> ProcessPaymentResult:
+        # 1. Load State (Generic I/O)
+        state = self.executor.load(payment_id)
         
-        match fetch_result:
-            case PaymentNotFound():
-                return fetch_result
-            
-            case PaymentFound(payment=payment):
-                # 2. Decide (Pure Domain—method on Payment)
-                intent = payment.decide_action()
-                
-                # 3. Act (via injected dependencies)
-                match intent:
-                    case ProcessIntent(new_state=s):
-                        self.gateway.charge(s.amount)
-                        self.store.save(s, db)
-                        return PaymentProcessed(kind="processed", payment_id=payment_id)
-                    
-                    case RequireVerificationIntent(reason=r):
-                        return VerificationRequired(kind="verification_required", reason=r)
+        # Handle "Not Found" as a valid result track
+        if not state:
+            return PaymentNotFound(kind=PaymentResultKind.NOT_FOUND, payment_id=payment_id)
+        
+        # 2. Pure Step (Domain Logic)
+        # The Domain Model (PaymentState) owns the decision.
+        new_state, intent = state.handle(event)
+        
+        # 3. Save State (Generic I/O)
+        self.executor.save(payment_id, new_state)
+        
+        # 4. Execute Intent (Generic I/O)
+        self.executor.execute(intent)
+        
+        return PaymentProcessed(kind=PaymentResultKind.PROCESSED, payment_id=payment_id)
 ```
 
 ---
 
 ## 3. Transaction Boundaries
-The Orchestrator is responsible for the **Unit of Work**. Wrap in transaction context.
+The Runtime is responsible for the **Unit of Work**. Wrap in transaction context.
 
 ### ✅ Pattern: Explicit Transactions
 ```python
-class TransactionalOrchestrator(BaseModel):
-    """Orchestrator with transaction boundary."""
-    model_config = {"frozen": True}
+class TransactionalRuntime:
+    """Runtime with transaction boundary."""
     
-    orchestrator: PaymentOrchestrator
+    def __init__(self, runtime: PaymentRuntime):
+        self.runtime = runtime
     
-    def process_safely(self, payment_id: str, db: Session) -> ProcessPaymentResult:
+    def run_safely(self, payment_id: PaymentId, db: Session) -> ProcessPaymentResult:
         with db.begin():
-            return self.orchestrator.process(payment_id, db)
+            return self.runtime.run(payment_id, db)
 ```
 
 ---
 
 ## Cognitive Checks
-- [ ] **Dependencies as Fields:** Are stores, gateways, executors declared as fields?
-- [ ] **No If Statements:** Does the orchestrator contain `if payment.amount > X`? (Move to Domain)
-- [ ] **No Object Creation:** Does the orchestrator call `Payment(...)`? (Use a Factory)
-- [ ] **Orchestrator is Model:** Is it a `BaseModel` with methods, not a standalone function?
-- [ ] **Explicit Results:** Does it return Sum Types, not `None` or raise?
-- [ ] **Dumb Piping:** Does it just pass data between models without modification?
+- [ ] **Dependencies as Fields:** Are executors injected via `__init__`?
+- [ ] **No If Statements:** Does the runtime contain `if payment.amount > X`? (Move to Domain)
+- [ ] **Runtime is Class:** Is it a regular `class`, NOT a `BaseModel`?
+- [ ] **Step Delegation:** Does it call `state.handle()` or `state.step()`?
+- [ ] **Side Effects via Intent:** Does it execute intents returned by the domain?
+- [ ] **No Magic Strings:** Are result kinds defined as Smart Enums?
+- [ ] **Value Objects:** Am I using `PaymentId` instead of `str`?

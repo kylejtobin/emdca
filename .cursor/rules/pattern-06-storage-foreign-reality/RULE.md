@@ -1,6 +1,6 @@
 ---
 description: "Pattern 06: Storage — Database as Foreign Reality with explicit translation."
-globs: ["**/store.py", "**/domain/**/*.py"]
+globs: ["**/domain/**/*.py", "**/service/**/*.py"]
 alwaysApply: false
 ---
 
@@ -9,57 +9,63 @@ alwaysApply: false
 ## Valid Code Structure
 
 ```python
+class StorageResultKind(StrEnum):
+    FOUND = "found"
+    NOT_FOUND = "not_found"
+
+class IntentKind(StrEnum):
+    LOAD_ORDER = "load_order"
+
 # Foreign Model: Represents the database row shape
 class DbOrder(BaseModel):
     model_config = {"frozen": True}
     
-    id: str
-    status: str
-    amount_cents: int
+    id: OrderId
+    status: OrderStatus
+    amount_cents: PositiveInt
     
     def to_domain(self) -> Order:
         return Order(
-            id=OrderId(self.id),
-            status=OrderStatus(self.status),
+            id=self.id,
+            status=self.status,
             amount=Money.from_cents(self.amount_cents),
         )
 
 # Query Result: Explicit Sum Type
 class OrderFound(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["found"]  # NO DEFAULT
+    kind: Literal[StorageResultKind.FOUND]  # NO DEFAULT
     order: Order
 
 class OrderNotFound(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["not_found"]  # NO DEFAULT
-    order_id: str
+    kind: Literal[StorageResultKind.NOT_FOUND]  # NO DEFAULT
+    order_id: OrderId
 
 type FetchOrderResult = OrderFound | OrderNotFound
 
-# Store: Frozen model that handles DB I/O
-class OrderStore(BaseModel):
+# Intent (Domain)
+class LoadOrderIntent(BaseModel):
     model_config = {"frozen": True}
-    
-    async def fetch(self, order_id: str, db: AsyncSession) -> FetchOrderResult:
-        result = await db.execute(select(orders_table).where(id=order_id))
-        row = result.first()
-        
-        if not row:
-            return OrderNotFound(kind="not_found", order_id=order_id)
-        
-        db_order = DbOrder.model_validate(row)
-        return OrderFound(kind="found", order=db_order.to_domain())
+    kind: Literal[IntentKind.LOAD_ORDER]
+    order_id: OrderId
 
-# Orchestrator: Store injected as field
-class OrderProcessor(BaseModel):
-    model_config = {"frozen": True}
+# Executor: Service Layer (Regular Class)
+class OrderExecutor:
+    def __init__(self, table_name: TableName):
+        self.table_name = table_name
     
-    store: OrderStore  # Injected dependency
-    
-    async def process(self, order_id: str, db: AsyncSession) -> ProcessResult:
-        fetch_result = await self.store.fetch(order_id, db)
-        # ... pattern match on result
+    async def execute_load(self, intent: LoadOrderIntent, db: Any) -> FetchOrderResult:
+        # 1. I/O
+        row = await db.fetch_one(intent.order_id)
+        
+        # 2. Translation
+        if not row:
+            return OrderNotFound(kind=StorageResultKind.NOT_FOUND, order_id=intent.order_id)
+        return OrderFound(
+            kind=StorageResultKind.FOUND, 
+            order=DbOrder.model_validate(row).to_domain()
+        )
 ```
 
 ## Constraints
@@ -68,7 +74,9 @@ class OrderProcessor(BaseModel):
 |----------|-----------|
 | `DbModel` with `.to_domain()` method | Repository pattern with abstract interface |
 | `Found \| NotFound` Sum Type | `return None` for not found |
-| Store as frozen `BaseModel` | Standalone query functions |
-| Store injected as field into orchestrator | Direct DB access in domain |
+| **Store as Executor (Service Layer)** | **Store as Class in Domain** |
+| **Domain returns Intent to Load** | **Domain calls Store.fetch()** |
 | `DbOrder.model_validate(row).to_domain()` | Raw dict passing |
-
+| **Executor is a Regular Class** | **Executor is a Pydantic Model or Dataclass** |
+| **Typed IDs (OrderId)** | **String IDs (str)** |
+| **Smart Enums for Kinds** | **String Literals for Kinds** |

@@ -1,14 +1,12 @@
 # Pattern 10: Infrastructure (Capability as Data)
 
 ## The Principle
-Domain contexts define abstract capabilities they need (event persistence, object storage). The Service layer binds those capabilities to specific technologies. The Domain never knows it's using NATS, S3, or Redis—it only knows it needs to persist events or store objects.
+Domain contexts define abstract capabilities they need as **Configuration Data**, not interfaces. The Service layer provides the execution runtime. The Domain never "calls" infrastructure; it outputs **Intents** that the runtime executes using the configuration.
 
 ## The Mechanism
-1. **Domain Capabilities:** Abstract models declaring what the domain needs (EventStore, ObjectStore)
-2. **Domain Failure Models:** Smart Enums enumerating how operations can fail (abstract, not tech-specific)
-3. **Service Binding:** Service layer defines technology-specific configs and executors
-
-The Domain never imports infrastructure libraries. It declares abstract needs.
+1. **Capability Config:** A Pydantic model defining the *parameters* of the capability (e.g., topic names, bucket names).
+2. **Intent:** A Pydantic model describing the *desire* to use the capability (e.g., "Save this").
+3. **Runtime Binding:** The Shell looks up the Config and executes the Intent.
 
 ---
 
@@ -41,23 +39,27 @@ class NatsStreamConfig(BaseModel):
 
 ---
 
-## ✅ Pattern: Abstract Domain Capability
+## ✅ Pattern: Capability as Data (Configuration)
 
-The domain declares WHAT it needs, not HOW infrastructure provides it.
+The domain declares the *parameters* it needs to operate, modeled as data.
 
 ```python
-# domain/event/store.py
-class EventStore(BaseModel):
-    """Abstract capability: I need event persistence."""
+# domain/event/capability.py
+class EventCapability(BaseModel):
+    """Configuration: I need a place to put events."""
     model_config = {"frozen": True}
     
-    async def append(self, event: Event) -> AppendResult:
-        """Append event. Implementation injected."""
-        ...
+    topic_prefix: TopicName
+    retention_days: PositiveInt
 
-    async def read(self, stream: str) -> ReadResult:
-        """Read events. Implementation injected."""
-        ...
+# domain/event/intent.py
+class PublishEventIntent(BaseModel):
+    """Intent: I want to publish an event."""
+    model_config = {"frozen": True}
+    kind: Literal[EventIntentKind.PUBLISH]
+    
+    payload: EventPayload
+    stream_id: StreamId
 ```
 
 ---
@@ -78,33 +80,29 @@ class EventStoreFailure(StrEnum):
 
 ---
 
-## ✅ Pattern: Technology Binding in Service
+## ✅ Pattern: Runtime Execution (The Shell)
 
-The service layer owns technology knowledge. It binds abstract capabilities to concrete implementations.
+The Shell matches the Intent, looks up the Capability Config, and performs the side effect.
 
 ```python
 # service/event.py
-from domain.event.store import EventStore
-from domain.event.failure import EventStoreFailure
-
-# Technology-specific config lives HERE, not in domain
-class NatsStreamConfig(BaseModel):
-    """What NATS expects. This is service-layer knowledge."""
-    model_config = {"frozen": True}
+class NatsRuntime:
+    """The Runtime knows how to interpret Config + Intent."""
     
-    name: str
-    subjects: tuple[str, ...]
-    retention: Literal["limits", "interest", "workqueue"]
-
-class NatsEventExecutor(BaseModel):
-    """Binds abstract EventStore to NATS."""
-    model_config = {"frozen": True}
+    def __init__(self, capability: EventCapability, client: NatsClient):
+        self.capability = capability
+        self.client = client
     
-    config: NatsStreamConfig
-    
-    async def execute(self, intent: EventIntent) -> EventStoreFailure | EventResult:
-        # Map NATS exceptions to abstract failures
-        ...
+    async def execute(self, intent: PublishEventIntent) -> PublishResult:
+        # 1. Use Config to determine *where* (Topic)
+        topic = f"{self.capability.topic_prefix}.{intent.stream_id}"
+        
+        # 2. Perform Side Effect (I/O)
+        try:
+            await self.client.publish(topic, intent.payload)
+            return PublishSuccess(kind=EventResultKind.PUBLISHED)
+        except NatsTimeoutError:
+            return PublishFailure(kind=EventResultKind.FAILED, reason=EventStoreFailure.TIMEOUT)
 ```
 
 ---
@@ -113,6 +111,7 @@ class NatsEventExecutor(BaseModel):
 
 - [ ] **No Libraries in Domain:** Did I remove `import boto3` / `import nats` from `domain/`?
 - [ ] **No Tech Configs in Domain:** Is `NatsStreamConfig` / `S3BucketConfig` in `service/`, not `domain/`?
-- [ ] **Domain is Abstract:** Does domain only declare capabilities (EventStore), not tech bindings?
+- [ ] **Domain is Data:** Does domain declare *Configuration*, not *Interfaces*?
 - [ ] **Failures are Abstract:** Are failure modes tech-agnostic (timeout, not NatsTimeout)?
-- [ ] **Service Binds:** Does the service layer own the technology-specific configuration?
+- [ ] **Service Executes:** Does the service layer execute Intents?
+- [ ] **Typed Config:** Am I using `TopicName`, not `str`?

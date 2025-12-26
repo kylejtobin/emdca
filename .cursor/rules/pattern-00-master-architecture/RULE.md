@@ -22,15 +22,15 @@ Check the mirror output. Fix violations before proceeding. This is your feedback
 
 **1. No `try/except`** — Models parse data, they don't catch exceptions.
 ```python
-# ❌ WRONG: Catching exceptions
+# ❌ WRONG: Catching exceptions in Domain
 try:
     result = client.send()
 except SmtpError as e:
     return Failure(str(e))
 
-# ✅ RIGHT: Infrastructure returns Sum Type, models parse it
-raw: RawSmtpResult = ...  # Sum Type from infrastructure edge
-outcome = raw.to_foreign().to_domain()  # Pure model composition
+# ✅ RIGHT: Let Infrastructure crash or return Result types
+raw: RawSmtpResult = ...  # Service gets this
+outcome = raw.to_foreign().to_domain()  # Pure data transformation
 ```
 
 **2. No default values** — Explicit at construction, always.
@@ -40,22 +40,23 @@ kind: Literal["email_sent"] = "email_sent"
 timeout: float = 5.0
 
 # ✅ RIGHT: Caller must be explicit
-kind: Literal["email_sent"]  # No default
-timeout: float  # No default
+kind: Literal[EmailResultKind.SENT]  # No default
+timeout: TimeoutSeconds  # No default
 ```
 
-**3. No standalone functions** — All logic is methods on frozen Pydantic models.
+**3. No standalone functions** — Logic lives in Containers.
 ```python
 # ❌ WRONG: Standalone function
 def execute(intent: Intent, raw: RawResult) -> Result:
     ...
 
-# ✅ RIGHT: Method on model
-class Executor(BaseModel):
-    model_config = {"frozen": True}
-    
-    def execute(self, intent: Intent, raw: RawResult) -> Result:
-        ...
+# ✅ RIGHT (Domain): Method on Model
+class User(BaseModel):
+    def decide(self) -> Intent: ...
+
+# ✅ RIGHT (Service): Method on Service Class
+class Executor:
+    def execute(self, intent: Intent) -> Result: ...
 ```
 
 ---
@@ -85,28 +86,29 @@ class Executor(BaseModel):
 - Events: Domain facts (what happened)
 - Results: `Success | Failure` discriminated unions
 - Foreign Models: Pydantic models mirroring external reality with `to_domain()` method
-- Capability Models: Pydantic models mirroring infrastructure interfaces
+- Capability Models: Pydantic models mirroring infrastructure CONFIGURATION (Data), not INTERFACES (Methods)
 - Clock: Frozen Pydantic model for time injection (not Protocol)
-- Stores: Frozen Pydantic models that handle DB I/O (injected into orchestrators)
-- Orchestrators: Frozen Pydantic models with **dependencies as fields** (stores, gateways, executors)
-- Executors: Frozen Pydantic models that compose Intent + RawResult → DomainOutcome
+- Stores: **Service Classes** that handle DB I/O (injected into orchestrators)
+- Orchestrators: **Service Classes** with **injected dependencies** (stores, gateways, executors)
+- Executors: **Service Classes** that compose Intent + RawResult → DomainOutcome
 
 ## Implementation Order
 1. Smart enums and value objects
 2. Aggregates (pure decision logic with transition methods)
 3. Commands / Intents / Events / Results
 4. Foreign Models (external → domain translation)
-5. Orchestrators (Pydantic models with coordination methods)
-6. Executors (Pydantic models at infrastructure edge)
+5. Orchestrators (Service classes with coordination methods)
+6. Executors (Service classes at infrastructure edge)
 
 **Note:** Composition root (`main.py`) is the ONE place where standalone wiring code exists—it instantiates and connects the models.
 
 ---
 
 ## LLM Rules (When Generating Code)
-- ALWAYS: Everything is a frozen Pydantic model
-- ALWAYS: All logic is methods on models
-- ALWAYS: Orchestrators/Executors have dependencies as fields (stores, gateways, clients)
+- ALWAYS: Domain Objects are frozen Pydantic models
+- ALWAYS: **Business Logic** is methods on Domain Models
+- ALWAYS: **Wiring Logic** is methods on Service Classes
+- ALWAYS: Orchestrators/Executors are **Service Classes** (Plain Python Classes)
 - ALWAYS: `type` only for Discriminated Unions (Sum Types)
 - ALWAYS: Dispatch via `match/case`
 - ALWAYS: Foreign Model chain: `raw.to_foreign().to_domain()`
@@ -118,9 +120,26 @@ class Executor(BaseModel):
 - NEVER: `| None` for mutually exclusive states
 - NEVER: Implicit `return` (use explicit `NotFound`, `NoOp` types)
 - NEVER: Hand-rolled `AfterValidator` when Pydantic has built-in types
-- NEVER: `typing.Protocol` (use Pydantic models)
+- NEVER: `typing.Protocol` (Use Data Specs / Intents)
 - NEVER: Business logic in orchestrators or executors
 - NEVER: `os.environ` access outside composition root
+
+---
+
+## 🧠 The EMDCA Discriminator (How to Decide)
+
+1.  **Identity Check (Data vs Behavior)**
+    - Does it *hold state* and *calculate*? -> **Domain Model** (`BaseModel`)
+    - Does it *hold config* and *execute*? -> **Service Class** (`class`)
+
+2.  **Mechanism Check (Structural vs Logic)**
+    - Is the input *impossible* (e.g. negative age)? -> **Structure**. Enforce via Type/Field. Crash on failure.
+    - Is the outcome *unfortunate* (e.g. insufficient funds)? -> **Logic**. Enforce via Method. Return Result.
+
+3.  **Context Check (Explicit vs Implicit)**
+    - Does it need the world (Time, DB)?
+        - **Domain:** Pass the **Value** (`datetime`, `list[Order]`).
+        - **Service:** Inject the **Provider** (`Clock`, `Repo`).
 
 ---
 

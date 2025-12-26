@@ -9,31 +9,37 @@ alwaysApply: false
 ## Valid Code Structure
 
 ```python
+# Smart Enum (Behavioral Type)
+class SignupKind(StrEnum):
+    PENDING = "pending"
+    VERIFIED = "verified"
+    COMPLETED = "completed"
+
 # Each workflow state is its own type
 class SignupPending(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["pending"]  # NO DEFAULT
-    email: EmailStr
+    kind: Literal[SignupKind.PENDING]
+    email: Email
     
-    def verify(self, user_id: str) -> tuple["SignupVerified", "SendEmailIntent"]:
-        new_state = SignupVerified(kind="verified", user_id=user_id)
-        intent = SendEmailIntent(to=self.email, template="welcome")
+    def verify(self, user_id: UserId) -> tuple["SignupVerified", "SendEmailIntent"]:
+        new_state = SignupVerified(kind=SignupKind.VERIFIED, user_id=user_id)
+        intent = SendEmailIntent(to=self.email, template=TemplateName.WELCOME)
         return new_state, intent
 
 class SignupVerified(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["verified"]  # NO DEFAULT
-    user_id: str
+    kind: Literal[SignupKind.VERIFIED]
+    user_id: UserId
     
     def complete(self) -> tuple["SignupCompleted", "NotifyAdminIntent"]:
-        new_state = SignupCompleted(kind="completed", user_id=self.user_id)
+        new_state = SignupCompleted(kind=SignupKind.COMPLETED, user_id=self.user_id)
         intent = NotifyAdminIntent(user_id=self.user_id)
         return new_state, intent
 
 class SignupCompleted(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["completed"]  # NO DEFAULT
-    user_id: str
+    kind: Literal[SignupKind.COMPLETED]
+    user_id: UserId
 
 # Sum Type for all states
 type SignupState = Annotated[
@@ -41,17 +47,22 @@ type SignupState = Annotated[
     Field(discriminator="kind")
 ]
 
-# Workflow Runner: Frozen model with dependencies as fields
-class WorkflowRunner(BaseModel):
-    model_config = {"frozen": True}
+# Workflow Runtime: Service Layer (Regular Class)
+class WorkflowRuntime:
+    def __init__(self, executor: WorkflowExecutor):
+        self.executor = executor
     
-    workflow: SignupWorkflow  # Injected
-    store: WorkflowStore      # Injected
-    
-    def run(self, workflow_id: str, event: WorkflowEvent, db: Session) -> RunResult:
-        state = self.store.fetch(workflow_id, db)
-        new_state, intent = self.workflow.step(state, event)
-        self.store.save(workflow_id, new_state, db)
+    async def run_step(self, id: WorkflowId, event: WorkflowEvent) -> RunResult:
+        # 1. Generic Load (I/O)
+        state = await self.executor.load(id)
+        
+        # 2. Pure Transition (Domain)
+        new_state, intent = state.handle(event)
+        
+        # 3. Generic Save (I/O)
+        await self.executor.save(id, new_state)
+        
+        # 4. Return Intent for Execution
         return RunResult(kind="stepped", intent=intent)
 ```
 
@@ -60,9 +71,9 @@ class WorkflowRunner(BaseModel):
 | Required | Forbidden |
 |----------|-----------|
 | Each state is its own frozen type | One class with `status` field |
+| **Smart Enums for State Kinds** | **String Literals for State Kinds** |
+| **Typed IDs (WorkflowId)** | **Primitive IDs (str)** |
 | Transition methods on source state | Standalone `def verify_signup()` functions |
 | Returns `(NewState, Intent)` tuple | Side effects in transition |
-| `kind: Literal["..."]` discriminator | `kind: Literal["..."] = "..."` default |
-| Runner is frozen model with dependency fields | Procedural `if/else` chains |
-| State serializable to JSON/DB | Closures or callbacks in state |
-
+| **Runtime is a Service Class** | **Runtime is a Pydantic Model or Dataclass** |
+| Runtime delegates to `state.handle()` | Logic inside Runtime |

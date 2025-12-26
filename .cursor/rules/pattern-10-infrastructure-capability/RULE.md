@@ -9,51 +9,47 @@ alwaysApply: false
 ## Valid Code Structure
 
 ```python
-# DOMAIN: Abstract capability (what we need)
-# domain/event/store.py
-class EventStore(BaseModel):
-    """Abstract capability: I need event persistence."""
+# DOMAIN: Configuration (Data), not Behavior (Methods)
+class EventCapability(BaseModel):
+    """Abstract capability: I need a topic with these params."""
     model_config = {"frozen": True}
-    
-    async def append(self, event: Event) -> AppendResult: ...
-    async def read(self, stream: str) -> ReadResult: ...
+    topic_name: TopicName
+    retention_days: PositiveInt
 
-# DOMAIN: Abstract failure modes
-# domain/event/failure.py
-class EventStoreFailure(StrEnum):
-    """How operations can fail (abstract, not tech-specific)."""
-    TIMEOUT = "timeout"
-    CONNECTION_LOST = "connection_lost"
-    NOT_FOUND = "not_found"
-    PERMISSION_DENIED = "permission_denied"
-
-# SERVICE: Technology binding (how we provide it)
-# service/event.py
-class NatsStreamConfig(BaseModel):
-    """What NATS expects. Service-layer knowledge."""
+# DOMAIN: Intent (Data)
+class StoreEventIntent(BaseModel):
+    """I want to store this."""
     model_config = {"frozen": True}
-    
-    name: str  # NO DEFAULT
-    subjects: tuple[str, ...]  # NO DEFAULT
-    retention: Literal["limits", "interest", "workqueue"]  # NO DEFAULT
+    kind: Literal[EventIntentKind.STORE]
+    event_data: EventPayload
 
-class NatsEventExecutor(BaseModel):
-    """Binds abstract EventStore to NATS."""
-    model_config = {"frozen": True}
+# SERVICE: Executor (Service Class)
+class EventExecutor:
+    """Binds Capability (Config) to Technology."""
     
-    config: NatsStreamConfig
+    def __init__(self, capability: EventCapability, client: NatsClient):
+        self.capability = capability
+        self.client = client
     
-    async def execute(self, intent: EventIntent) -> EventStoreFailure | EventResult:
-        # Map NATS exceptions to abstract domain failures
-        ...
+    async def execute(self, intent: StoreEventIntent) -> EventResult:
+        # Use Config to direct the Action
+        topic = self.capability.topic_name
+        
+        try:
+            await self.client.publish(topic, intent.event_data)
+            return EventStored(kind=EventResultKind.STORED)
+        except NatsError:
+            return EventFailed(kind=EventResultKind.FAILED)
 ```
 
 ## Constraints
 
 | Required | Forbidden |
 |----------|-----------|
-| Domain declares abstract capabilities | `import boto3` / `import nats` in domain |
+| Domain declares **Configuration Data** | `import boto3` / `import nats` in domain |
 | Failure modes as abstract `StrEnum` | Technology-specific configs in domain |
 | Service layer owns tech configs | `NatsStreamConfig` in `domain/` |
-| Service layer binds abstract to concrete | `domain/infra/` directory |
+| **Service executes Intents** | **Service implements Interfaces** |
 | All fields explicit, no defaults | Side effects on model init |
+| **Capabilities are Data (Specs)** | **Capabilities are Interfaces (Methods)** |
+| **Executor is a Service Class** | **Executor is a Pydantic Model** |

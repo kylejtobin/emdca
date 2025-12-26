@@ -9,33 +9,40 @@ alwaysApply: false
 ## Valid Code Structure
 
 ```python
+# Smart Enum
+class CreationResultKind(StrEnum):
+    CREATED = "created"
+    REJECTED = "rejected"
+
 # Value Objects: Use Pydantic built-ins
 class User(BaseModel):
     model_config = {"frozen": True}
-    email: EmailStr  # NOT str
-    age: PositiveInt  # NOT int
+    email: EmailStr
+    age: PositiveInt = Field(ge=18)  # Structural Constraint!
 
 # Result Types: Explicit success/failure
 class UserCreated(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["created"]  # NO DEFAULT
+    kind: Literal[CreationResultKind.CREATED]
     user: User
 
 class UserRejected(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["rejected"]  # NO DEFAULT
-    reason: str
+    kind: Literal[CreationResultKind.REJECTED]
+    reason: RejectionReason
 
 type CreateUserResult = UserCreated | UserRejected
 
-# Factory: Method on a model, returns Result
-class UserFactory(BaseModel):
-    model_config = {"frozen": True}
-    
-    def create(self, raw: RawUserData) -> CreateUserResult:
-        if raw.age < 18:
-            return UserRejected(kind="rejected", reason="Must be 18+")
-        return UserCreated(kind="created", user=User(email=raw.email, age=raw.age))
+# Factory: Pure Construction (Crash on Failure)
+class UserFactory:
+    @staticmethod
+    def create(raw: dict) -> CreateUserResult:
+        # Pydantic handles validation. If it fails, it crashes.
+        # This is correct. The system does not accept invalid input.
+        return UserCreated(
+            kind=CreationResultKind.CREATED,
+            user=User.model_validate(raw)
+        )
 ```
 
 ## Constraints
@@ -44,7 +51,7 @@ class UserFactory(BaseModel):
 |----------|-----------|
 | `model_config = {"frozen": True}` | Default values on fields |
 | `EmailStr`, `PositiveInt` (Pydantic built-ins) | `str`, `int` for domain concepts |
-| Factory as method on model | Standalone `def create_user()` functions |
-| Return `Success \| Failure` Sum Type | `raise ValueError()` |
-| `kind: Literal["..."]` explicit | `kind: Literal["..."] = "..."` |
-
+| **Factory simply calls model_validate** | **Factory manual if/else checks** |
+| **Constraint encoded in Type** | **Constraint encoded in Factory Logic** |
+| Crash on invalid input | `try/except` inside Domain |
+| **Smart Enums for Kinds** | **String Literals** |

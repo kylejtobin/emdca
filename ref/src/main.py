@@ -4,63 +4,39 @@ THE COMPOSITION ROOT (Launcher)
 Role: The Big Bang. Configures and starts the application.
 Mandate: Mandate V (Config) & VIII (Coordination) & X (Infrastructure).
 Pattern: ref/patterns/05-config-injection.md
-Pattern: ref/patterns/10-infrastructure-capability-as-data.md
 
 Flow:
-1. Load Env (Foreign) -> Config (Domain) via Sum Type result.
-2. Build Infrastructure clients (raw I/O, returns Sum Types).
-3. Wire Orchestrators with dependencies as fields.
-4. Build Interface via AppFactory model.
-5. Run (uvicorn).
-
-Note: This is the ONE place where standalone wiring code exists.
+1. Load Config (Crash on Failure).
+2. Wire Infrastructure (Service Classes).
+3. Launch Interface (App).
 
 Example Implementation:
 ```python
-import sys
-import asyncio
 import uvicorn
-import os
-from api.app import AppFactory
-from api.deps import Clock
-from domain.system.env import EnvVars
-from service.conversation import ConversationConnector, Connected, ConnectionFailed
-from service.conversation import ConversationOrchestrator, ConversationStore
+from domain.system.config import AppConfig
+from service.conversation import ConversationExecutor, ConversationRuntime
+from api.app import create_api
 
-async def main():
-    # 1. Translate Config (Sum Type result)
-    raw = os.environ
-    config_result = EnvVars.model_validate(raw).to_config()
+def main():
+    # 1. Load Config (System crashes if env is missing)
+    # AppConfig inherits BaseSettings, so it loads from env/files automatically.
+    config = AppConfig()
 
-    match config_result:
-        case ConfigInvalid(errors=e):
-            sys.exit(f"Config invalid: {e}")
-        case ConfigValid(config=config):
-            pass
+    # 2. Wire Dependencies (Service Classes)
+    # Executors take Config
+    executor = ConversationExecutor(
+        dsn=config.database_url,
+        api_key=config.api_key
+    )
+    
+    # Runtimes take Executors
+    runtime = ConversationRuntime(executor=executor)
 
-    # 2. Setup Infrastructure (Executor returns Sum Type)
-    connector = ConversationConnector(url=config.nats_url)
-    connect_result = await connector.connect()
-
-    match connect_result:
-        case ConnectionFailed(error=e):
-            sys.exit(f"Infrastructure setup failed: {e}")
-        case Connected(client=nc):
-            pass
-
-    # 3. Wire Orchestrators (dependencies as fields)
-    clock = Clock()
-    store = ConversationStore(db=db)
-    orchestrator = ConversationOrchestrator(store=store, bus=nc, clock=clock)
-
-    # 4. Build Interface via AppFactory
-    factory = AppFactory(config=config, orchestrator=orchestrator)
-    app = factory.create()
-
-    # 5. Run
-    uvicorn.run(app)
+    # 3. Launch Interface (pass wired services)
+    app = create_api(runtime=runtime)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
 ```
 """

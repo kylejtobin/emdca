@@ -4,7 +4,7 @@
 Validation is not a check; it is a construction process. Logic is a calculation, not an action. Therefore, the code that makes decisions must be separated from the code that executes them.
 
 ## The Mechanism
-All data enters the domain through **Pure Factory Methods** on frozen Pydantic models. These methods accept raw, unstructured data and "parse" it into a valid Domain Type. If the data is invalid, the factory returns a Failure Type. The factory handles every possible input state (Total Function).
+All data enters the domain through **Pure Factory Methods** (or direct `model_validate` calls). We rely on **Correctness by Construction**. If data does not fit the type, construction fails (crashes/raises). We do not "handle" invalid input in the domain; we reject it at the boundary.
 
 ---
 
@@ -30,107 +30,64 @@ from pydantic import BaseModel, EmailStr
 class User(BaseModel):
     model_config = {"frozen": True}
     
-    id: int
+    id: UserId
     email: EmailStr  # Pydantic built-in—guarantees validity
 ```
 
 ---
 
-## 2. The Pure Factory: Handling Failure
-When constructing complex aggregates, we never raise exceptions. We return a **Result** that explicitly models success or failure.
+## 2. The Pure Factory: Constraint by Type
+We do not write `if` statements to check data. We define Types that enforce constraints.
 
-### ❌ Anti-Pattern: Raising Exceptions
+### ❌ Anti-Pattern: Manual Logic
 ```python
 def create_user(data: dict) -> User:
     if data['age'] < 18:
-        raise ValueError("Too young")  # ❌ Implicit failure path
+        raise ValueError("Too young")  # ❌ Logic disguised as validation
     return User(**data)
 ```
 
-### ✅ Pattern: Explicit Result Types
-Use a Discriminated Union to force the caller to handle the failure case. Factory is a method on a model.
+### ✅ Pattern: Structural Constraints
+The Type itself enforces the rule. The Factory just attempts to build it.
 
 ```python
-from typing import Literal
-from pydantic import BaseModel, EmailStr
+from enum import StrEnum
+from pydantic import BaseModel, Field, EmailStr
 
-# 1. Define the Success and Failure Contexts
-class UserCreated(BaseModel):
+class CreationResultKind(StrEnum):
+    CREATED = "created"
+    REJECTED = "rejected"
+
+# 1. Define the Constraint
+class AdultAge(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["created"]  # NO DEFAULT
-    user: User
+    # The rule is here, not in code
+    value: int = Field(ge=18)
 
-class UserRejected(BaseModel):
+class User(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["rejected"]  # NO DEFAULT
-    reason: str
+    email: EmailStr
+    age: AdultAge
 
-type CreateUserResult = UserCreated | UserRejected
-
-
-# 2. Raw input as Foreign Model (validates at edge)
-class RawUserData(BaseModel):
-    """Foreign Model: Raw input from external source."""
-    model_config = {"frozen": True}
+# 2. The Factory (Pass-through)
+class UserFactory:
+    """Namespace for factory logic."""
     
-    id: int
-    email: EmailStr  # Validated at infrastructure edge
-    age: int
-
-
-# 3. Factory as method on a model
-class UserFactory(BaseModel):
-    """Factory model with creation method."""
-    model_config = {"frozen": True}
-    
-    def create(self, raw: RawUserData) -> CreateUserResult:
-        # Domain Rules only—email already valid by construction
-        if raw.age < 18:
-            return UserRejected(kind="rejected", reason="User must be 18+")
-        
-        # Pure construction—no validation needed, types guarantee it
-        user = User(id=raw.id, email=raw.email)
-        return UserCreated(kind="created", user=user)
-```
-
----
-
-## 3. Explicit Construction (No Defaults)
-Domain Models must describe the *Shape* of data, not the *Rules* of data. Default values are hidden business rules.
-
-### ❌ Anti-Pattern: Implicit Defaults
-```python
-class Order(BaseModel):
-    status: str = "pending"  # ❌ Rule buried in schema
-    created_at: datetime = Field(default_factory=datetime.now)  # ❌ Side effect
-```
-
-### ✅ Pattern: Explicit Factory
-The Schema is dumb. The Factory is smart.
-
-```python
-class Order(BaseModel):
-    model_config = {"frozen": True}
-    status: OrderStatus  # No default
-    created_at: datetime  # No default
-
-
-class OrderFactory(BaseModel):
-    model_config = {"frozen": True}
-    clock: Clock  # Injected dependency
-    
-    def create(self, user: User) -> Order:
-        return Order(
-            status=OrderStatus.PENDING,
-            created_at=self.clock.now(),
-        )
+    @staticmethod
+    def create(raw: dict) -> User:
+        # We blindly attempt construction.
+        # If raw['age'] is 15, Pydantic raises ValidationError.
+        # The System crashes (rejects input). This is correct.
+        return User.model_validate(raw)
 ```
 
 ---
 
 ## Cognitive Checks
-- [ ] **No Defaults:** Did I remove all `= "default"` assignments in my Domain Models?
-- [ ] **No Hand-Rolled Validators:** Am I using `EmailStr`, `PositiveInt`, etc. instead of `AfterValidator`?
-- [ ] **Factory is a Model:** Is my factory a method on a `BaseModel`, not a standalone function?
-- [ ] **No try/except:** Does the factory return Result types without catching exceptions?
-- [ ] **Immutable Output:** Is `model_config = {"frozen": True}` set on all models?
+- [ ] **No Validation Methods:** Did I remove `.validate()` or `.check()`?
+- [ ] **No Manual Ifs:** Did I remove `if age < 18`?
+- [ ] **Type Constraints:** Is the rule encoded in `Field(...)` or a Value Object?
+- [ ] **Frozen Models:** Is `model_config = {"frozen": True}` everywhere?
+- [ ] **Crash on Invalid:** Do I allow Pydantic to raise `ValidationError`?
+- [ ] **Pure Class:** Is the factory a plain class or static method?
+- [ ] **Smart Enums:** Am I using `CreationResultKind`?
