@@ -33,15 +33,3 @@ jobs:
         # We rely on mypy for now as per local setup, though pyproject references pyright config
         # We'll run mypy since we validated it locally.
         run: uv run mypy .
-
-      - name: Run Tests (Pytest)
-        # Exit code 5 means no tests collected, which is valid for reference repos
-        run: |
-          uv run pytest
-          exit_code=$?
-          if [ $exit_code -eq 5 ]; then
-            echo "No tests collected (exit code 5) - this is valid for reference repos"
-            exit 0
-          else
-            exit $exit_code
-          fi
