@@ -19,6 +19,9 @@ class User(BaseModel):
     model_config = {"frozen": True}
     email: EmailStr
     age: PositiveInt = Field(ge=18)  # Structural Constraint!
+    
+    # Injected Capability
+    emailer: EmailCapability
 
 # Result Types: Explicit success/failure
 class UserCreated(BaseModel):
@@ -33,16 +36,22 @@ class UserRejected(BaseModel):
 
 type CreateUserResult = UserCreated | UserRejected
 
-# Factory: Pure Construction (Crash on Failure)
+# Factory: Pure Construction (Crash on Failure) + Assembly
 class UserFactory:
     @staticmethod
-    def create(raw: dict) -> CreateUserResult:
-        # Pydantic handles validation. If it fails, it crashes.
+    def create(raw: dict, emailer: EmailCapability) -> CreateUserResult:
+        # 1. Parse Data (Pydantic handles validation. If it fails, it crashes.)
         # This is correct. The system does not accept invalid input.
-        return UserCreated(
-            kind=CreationResultKind.CREATED,
-            user=User.model_validate(raw)
+        user_data = UserData.model_validate(raw)
+        
+        # 2. Inject Capability
+        user = User(
+            email=user_data.email, 
+            age=user_data.age, 
+            emailer=emailer
         )
+        
+        return UserCreated(kind=CreationResultKind.CREATED, user=user)
 ```
 
 ## Constraints
@@ -53,5 +62,6 @@ class UserFactory:
 | `EmailStr`, `PositiveInt` (Pydantic built-ins) | `str`, `int` for domain concepts |
 | **Factory simply calls model_validate** | **Factory manual if/else checks** |
 | **Constraint encoded in Type** | **Constraint encoded in Factory Logic** |
+| **Factory injects Capabilities** | **Factory is Pydantic Model** |
 | Crash on invalid input | `try/except` inside Domain |
 | **Smart Enums for Kinds** | **String Literals** |

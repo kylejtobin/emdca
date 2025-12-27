@@ -15,49 +15,33 @@ class PaymentResultKind(StrEnum):
     PROCESSED = "processed"
     VERIFICATION_REQUIRED = "verification_required"
 
-class PaymentNotFound(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal[PaymentResultKind.NOT_FOUND]
-    payment_id: PaymentId
-
-class PaymentProcessed(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal[PaymentResultKind.PROCESSED]
-    payment_id: PaymentId
-
-class VerificationRequired(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal[PaymentResultKind.VERIFICATION_REQUIRED]
-    reason: VerificationReason
-
-type ProcessPaymentResult = PaymentNotFound | PaymentProcessed | VerificationRequired
-
-# Service Class: The Runtime (Orchestrator)
-class PaymentRuntime:
+# The Runtime: Smart Domain Model (Active Orchestrator)
+class PaymentRuntime(BaseModel):
     """
-    The Runtime drives the process.
-    It loads state, steps the machine, saves state, and executes intents.
-    It contains NO business logic.
+    Active Domain Model.
+    Drives the process by coordinating other Smart Models.
+    Lives in the Domain.
     """
-    def __init__(self, executor: PaymentExecutor):
-        self.executor = executor
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    
+    # Injected Smart Capabilities
+    store: PaymentStore
+    gateway: PaymentGateway
 
-    def run(self, payment_id: PaymentId, event: PaymentEvent) -> ProcessPaymentResult:
-        # 1. Load State (I/O)
-        state = self.executor.load(payment_id)
+    async def run(self, payment_id: PaymentId, event: PaymentEvent) -> ProcessPaymentResult:
+        # 1. Load State (Active Store)
+        state = await self.store.load(payment_id)
         if not state:
             return PaymentNotFound(kind=PaymentResultKind.NOT_FOUND, payment_id=payment_id)
 
         # 2. Pure Step (Domain Logic)
-        # The Domain decides what happens next.
         new_state, intent = state.handle(event)
 
-        # 3. Save State (I/O)
-        self.executor.save(payment_id, new_state)
+        # 3. Save State (Active Store)
+        await self.store.save(payment_id, new_state)
 
-        # 4. Execute Intent (Side Effect)
-        # The Domain decided WHAT to do; the Runtime does it.
-        self.executor.execute(intent)
+        # 4. Execute Intent (Active Gateway)
+        await self.gateway.execute(intent)
         
         return PaymentProcessed(kind=PaymentResultKind.PROCESSED, payment_id=payment_id)
 ```
@@ -66,10 +50,10 @@ class PaymentRuntime:
 
 | Required | Forbidden |
 |----------|-----------|
-| **Runtime is a Service Class** | **Runtime is a Pydantic Model** |
+| **Runtime is a Domain Model** | **Runtime is a Service Class** |
 | Logic delegated to Domain `state.handle()` | Logic inside `run()` |
 | **Reactive Loop Pattern** | **Procedural Script Pattern** |
-| Explicit Dependencies (`executor`) | Implicit Globals |
+| Injected Capabilities (`store`) | Implicit Globals |
 | `match/case` for flow control | `raise` for control flow |
 | **Smart Enums for Result Kinds** | **Magic Strings for Result Kinds** |
 | **Typed IDs (PaymentId)** | **String IDs (str)** |

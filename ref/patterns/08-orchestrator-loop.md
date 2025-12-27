@@ -2,9 +2,10 @@
 
 ## The Principle
 A system needs a "driver" that does no thinking, only moving. It coordinates the flow of data between models and execution shell. We call this the **Runtime** or **Orchestrator**.
+In EMDCA, the **Runtime** is a **Smart Domain Model** that encapsulates the coordination logic and holds the necessary Capabilities.
 
 ## The Mechanism
-The **Runtime** is a Service Class (not a Model). It runs a "dumb" reactive loop: Load → Step → Save → Execute. It contains no business rules, only flow control.
+The **Runtime** is a Domain Model (`BaseModel`). It runs a "dumb" reactive loop: Load → Step → Save → Execute. It contains no business rules, only flow control.
 
 ---
 
@@ -22,7 +23,7 @@ def process_payment(payment_id: str, db: Session):  # ❌ Standalone function
 
 ---
 
-## 2. The Runtime (Service Class)
+## 2. The Runtime (Smart Model)
 
 The Runtime drives the State Machine. It does not decide; it merely executes the Domain's decisions.
 
@@ -34,29 +35,29 @@ class PaymentResultKind(StrEnum):
     NOT_FOUND = "not_found"
     PROCESSED = "processed"
 
-class PaymentRuntime:
-    """Service Class: Wiring only."""
+class PaymentRuntime(BaseModel):
+    """Active Domain Model. Drives the loop."""
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
     
-    def __init__(self, executor: PaymentExecutor):
-        self.executor = executor
+    store: PaymentStore      # Smart Capability
+    gateway: PaymentGateway  # Smart Capability
     
-    def run(self, payment_id: PaymentId, event: PaymentEvent) -> ProcessPaymentResult:
-        # 1. Load State (Generic I/O)
-        state = self.executor.load(payment_id)
+    async def run(self, payment_id: PaymentId, event: PaymentEvent) -> ProcessPaymentResult:
+        # 1. Load State (Active Store)
+        state = await self.store.load(payment_id)
         
         # Handle "Not Found" as a valid result track
         if not state:
             return PaymentNotFound(kind=PaymentResultKind.NOT_FOUND, payment_id=payment_id)
         
         # 2. Pure Step (Domain Logic)
-        # The Domain Model (PaymentState) owns the decision.
         new_state, intent = state.handle(event)
         
-        # 3. Save State (Generic I/O)
-        self.executor.save(payment_id, new_state)
+        # 3. Save State (Active Store)
+        await self.store.save(payment_id, new_state)
         
-        # 4. Execute Intent (Generic I/O)
-        self.executor.execute(intent)
+        # 4. Execute Intent (Active Gateway)
+        await self.gateway.execute(intent)
         
         return PaymentProcessed(kind=PaymentResultKind.PROCESSED, payment_id=payment_id)
 ```
@@ -68,24 +69,22 @@ The Runtime is responsible for the **Unit of Work**. Wrap in transaction context
 
 ### ✅ Pattern: Explicit Transactions
 ```python
-class TransactionalRuntime:
+class TransactionalRuntime(BaseModel):
     """Runtime with transaction boundary."""
+    model_config = {"frozen": True}
     
-    def __init__(self, runtime: PaymentRuntime):
-        self.runtime = runtime
+    runtime: PaymentRuntime
     
-    def run_safely(self, payment_id: PaymentId, db: Session) -> ProcessPaymentResult:
-        with db.begin():
-            return self.runtime.run(payment_id, db)
+    async def run_safely(self, payment_id: PaymentId, db: Session) -> ProcessPaymentResult:
+        async with db.begin():
+            return await self.runtime.run(payment_id, event)
 ```
 
 ---
 
 ## Cognitive Checks
-- [ ] **Dependencies as Fields:** Are executors injected via `__init__`?
+- [ ] **Runtime is Model:** Is it a `BaseModel`?
+- [ ] **Capabilities Injected:** Does it hold `store` and `gateway` as fields?
 - [ ] **No If Statements:** Does the runtime contain `if payment.amount > X`? (Move to Domain)
-- [ ] **Runtime is Class:** Is it a regular `class`, NOT a `BaseModel`?
 - [ ] **Step Delegation:** Does it call `state.handle()` or `state.step()`?
-- [ ] **Side Effects via Intent:** Does it execute intents returned by the domain?
-- [ ] **No Magic Strings:** Are result kinds defined as Smart Enums?
-- [ ] **Value Objects:** Am I using `PaymentId` instead of `str`?
+- [ ] **Active Execution:** Does it call `gateway.execute(intent)`?

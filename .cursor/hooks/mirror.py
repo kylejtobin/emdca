@@ -17,25 +17,18 @@ Constraints:
 from __future__ import annotations
 
 import ast
-import fnmatch
 import json
 import re
 import sys
 from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Literal, NewType, TextIO
+from typing import Annotated, Any, Literal
 
-from pydantic import (
-    BaseModel,
-    Field,
-    PositiveInt,
-    RootModel,
-    ValidationError,
-)
+from pydantic import BaseModel, Field, PositiveInt, RootModel, ValidationError
 
 # =============================================================================
-# 1. DOMAIN (Types & Logic)
+# 1. DOMAIN (Types)
 # =============================================================================
 
 
@@ -66,83 +59,33 @@ class SignalKind(StrEnum):
     BOOLEAN_FLAG = "boolean_flag"
 
 
-SignalHint = NewType("SignalHint", str)
-
-
-class AnalysisContext(BaseModel):
-    """Context for the analysis logic."""
-
-    model_config = {"frozen": True}
-    file_path: Path
-
-    @property
-    def is_domain(self) -> bool:
-        return "domain" in self.file_path.parts
-
-    @property
-    def is_service(self) -> bool:
-        return "service" in self.file_path.parts
-
-
 class Signal(BaseModel):
-    """A detected violation of EMDCA principles."""
+    """A mechanical observation of a potential violation."""
 
     model_config = {"frozen": True}
     kind: SignalKind
     pattern_id: PatternId
     line: PositiveInt
     content: str
-    hint: SignalHint
+    hint: str
 
 
-class RuleRef(BaseModel):
-    """Reference to an architectural rule."""
-
-    model_config = {"frozen": True}
-    pattern_id: PatternId
-    name: str
-    globs: tuple[str, ...]
-
-    def matches(self, path: Path) -> bool:
-        path_str = str(path)
-        for g in self.globs:
-            p = g.replace("**", "*")
-            if fnmatch.fnmatch(path_str, f"*{p}") or fnmatch.fnmatch(path_str, p):
-                return True
-        return False
+# =============================================================================
+# 2. LOGIC (Detection)
+# =============================================================================
 
 
-# --- PURE LOGIC: Signal Detection ---
+def detect_signal(
+    node: ast.AST, file_path: Path, get_line: Callable[[int], str]
+) -> Signal | None:
+    """Pure Function: Map AST node to Signal."""
+    is_domain = "domain" in file_path.parts
+    is_service = "service" in file_path.parts
 
-
-class SignalDetector:
-    """Pure Domain Service: Maps AST Nodes to Signals."""
-
-    @staticmethod
-    def check_node(
-        node: ast.AST, context: AnalysisContext, get_line: Callable[[int], str]
-    ) -> Signal | None:
-        """Dispatch node to specific checks."""
-        if isinstance(node, ast.ClassDef):
-            return SignalDetector._check_class(node, context, get_line)
-        if isinstance(node, ast.FunctionDef):
-            return SignalDetector._check_function(node, context, get_line)
-        if isinstance(node, ast.Try):
-            return SignalDetector._check_try(node, context, get_line)
-        if isinstance(node, ast.Raise):
-            return SignalDetector._check_raise(node, context, get_line)
-        if isinstance(node, ast.Await):
-            return SignalDetector._check_await(node, context, get_line)
-        if isinstance(node, ast.AnnAssign):
-            return SignalDetector._check_annotation(node, context, get_line)
-        return None
-
-    @staticmethod
-    def _check_class(
-        node: ast.ClassDef, context: AnalysisContext, get_line: Callable[[int], str]
-    ) -> Signal | None:
-        # 1. Service Identity Violation: Service Class inheriting BaseModel
-        if context.is_service:
+    # 1. Class Definitions
+    if isinstance(node, ast.ClassDef):
+        # Service Classes must be Plain
+        if is_service:
             for base in node.bases:
                 if isinstance(base, ast.Name) and base.id == "BaseModel":
                     return Signal(
@@ -150,13 +93,11 @@ class SignalDetector:
                         pattern_id=PatternId.P00_MASTER,
                         line=node.lineno,
                         content=get_line(node.lineno),
-                        hint=SignalHint(
-                            "Service classes must be Plain Classes, not Pydantic Models."
-                        ),
+                        hint="Service classes must be Plain Classes, not Pydantic Models.",
                     )
 
-        # 2. Domain Identity Violation: Domain Object NOT inheriting BaseModel (or Enum/Exception)
-        if context.is_domain:
+        # Domain Objects must be Models (mostly)
+        if is_domain:
             is_model = any(
                 (isinstance(b, ast.Name) and b.id == "BaseModel") for b in node.bases
             )
@@ -173,351 +114,203 @@ class SignalDetector:
                     pattern_id=PatternId.P00_MASTER,
                     line=node.lineno,
                     content=get_line(node.lineno),
-                    hint=SignalHint(
-                        "Domain objects must be Pydantic Models (Data) or Enums."
-                    ),
+                    hint="Domain objects must be Pydantic Models (Data) or Enums.",
                 )
 
-        # 3. Service Injection Violation: Service class defined in Domain
-        if context.is_domain and re.search(
-            r"(Service|Manager|Handler|Processor)$", node.name
-        ):
+        # Service Injection in Domain
+        if is_domain and re.search(r"(Service|Manager|Handler|Processor)$", node.name):
             return Signal(
                 kind=SignalKind.SERVICE_IN_DOMAIN,
                 pattern_id=PatternId.P04_EXECUTION,
                 line=node.lineno,
                 content=get_line(node.lineno),
-                hint=SignalHint(
-                    "Service/Manager classes belong in service/, not domain/."
-                ),
+                hint="Service/Manager classes belong in service/, not domain/.",
             )
 
-        return None
+    # 2. Control Flow
+    if is_domain:
+        if isinstance(node, ast.Try):
+            return Signal(
+                kind=SignalKind.TRY_BLOCK,
+                pattern_id=PatternId.P03_RAILWAY,
+                line=node.lineno,
+                content=get_line(node.lineno),
+                hint="Avoid try/except in Domain. Use Result Types or Let it Crash.",
+            )
+        if isinstance(node, ast.Raise):
+            return Signal(
+                kind=SignalKind.RAISE_STMT,
+                pattern_id=PatternId.P03_RAILWAY,
+                line=node.lineno,
+                content=get_line(node.lineno),
+                hint="Avoid raise in Domain. Return Failure Result Types.",
+            )
+        if isinstance(node, ast.Await):
+            return Signal(
+                kind=SignalKind.AWAIT_EXPR,
+                pattern_id=PatternId.P04_EXECUTION,
+                line=node.lineno,
+                content=get_line(node.lineno),
+                hint="Domain Logic should be Pure/Synchronous. Async/IO belongs in Shell.",
+            )
 
-    @staticmethod
-    def _check_function(
-        node: ast.FunctionDef, context: AnalysisContext, get_line: Callable[[int], str]
-    ) -> Signal | None:
-        # Pattern 01: Factory Naming
+    # 3. Naming Smells
+    if isinstance(node, ast.FunctionDef):
         if re.match(r"^(validate_|check_|verify_)", node.name):
             return Signal(
                 kind=SignalKind.VALIDATE_FUNCTION,
                 pattern_id=PatternId.P01_FACTORY,
                 line=node.lineno,
                 content=get_line(node.lineno),
-                hint=SignalHint(
-                    "Avoid validation functions. Use Parse-Don't-Validate via Types."
-                ),
+                hint="Avoid validation functions. Use Parse-Don't-Validate via Types.",
             )
-        return None
 
-    @staticmethod
-    def _check_try(
-        node: ast.Try, context: AnalysisContext, get_line: Callable[[int], str]
-    ) -> Signal | None:
-        # Pattern 03: No Try/Catch in Logic
-        if context.is_domain:
-            return Signal(
-                kind=SignalKind.TRY_BLOCK,
-                pattern_id=PatternId.P03_RAILWAY,
-                line=node.lineno,
-                content=get_line(node.lineno),
-                hint=SignalHint(
-                    "Avoid try/except in Domain. Use Result Types or Let it Crash."
-                ),
-            )
-        return None
-
-    @staticmethod
-    def _check_raise(
-        node: ast.Raise, context: AnalysisContext, get_line: Callable[[int], str]
-    ) -> Signal | None:
-        # Pattern 03: No Raise in Logic
-        if context.is_domain:
-            return Signal(
-                kind=SignalKind.RAISE_STMT,
-                pattern_id=PatternId.P03_RAILWAY,
-                line=node.lineno,
-                content=get_line(node.lineno),
-                hint=SignalHint("Avoid raise in Domain. Return Failure Result Types."),
-            )
-        return None
-
-    @staticmethod
-    def _check_await(
-        node: ast.Await, context: AnalysisContext, get_line: Callable[[int], str]
-    ) -> Signal | None:
-        # Pattern 04: Domain should be Pure (Synchronous)
-        if context.is_domain:
-            return Signal(
-                kind=SignalKind.AWAIT_EXPR,
-                pattern_id=PatternId.P04_EXECUTION,
-                line=node.lineno,
-                content=get_line(node.lineno),
-                hint=SignalHint(
-                    "Domain Logic should be Pure/Synchronous. Async/IO belongs in Shell."
-                ),
-            )
-        return None
-
-    @staticmethod
-    def _check_annotation(
-        node: ast.AnnAssign, context: AnalysisContext, get_line: Callable[[int], str]
-    ) -> Signal | None:
-        # Pattern 01: Primitive Types
-        if context.is_domain:
-            if isinstance(node.annotation, ast.Name) and node.annotation.id in (
-                "str",
-                "int",
-                "float",
-                "bool",
-            ):
-                return Signal(
-                    kind=SignalKind.PRIMITIVE_TYPE,
-                    pattern_id=PatternId.P01_FACTORY,
-                    line=node.lineno,
-                    content=get_line(node.lineno),
-                    hint=SignalHint(
-                        f"Primitive type '{node.annotation.id}' — use Value Object (e.g. Email, UserId)."
-                    ),
-                )
-        return None
-
-
-# =============================================================================
-# 2. SERVICE (Orchestration & IO)
-# =============================================================================
-
-
-class FileScanner:
-    """Service Class: Orchestrates scanning of a single file."""
-
-    def __init__(self, rules: tuple[RuleRef, ...]):
-        self.rules = rules
-
-    def scan_file(self, path: Path, content: str) -> tuple[Signal, ...]:
-        try:
-            tree = ast.parse(content)
-        except SyntaxError:
-            return ()
-
-        lines = content.splitlines()
-
-        def get_line(n: int) -> str:
-            if 1 <= n <= len(lines):
-                line_content = lines[n - 1].strip()
-                return (
-                    line_content[:60] + "..."
-                    if len(line_content) > 60
-                    else line_content
-                )
-            return ""
-
-        context = AnalysisContext(file_path=path)
-        signals: list[Signal] = []
-
-        for node in ast.walk(tree):
-            sig = SignalDetector.check_node(node, context, get_line)
-            if sig:
-                signals.append(sig)
-
-        return tuple(signals)
-
-    def get_applicable_rules(self, path: Path) -> tuple[RuleRef, ...]:
-        return tuple(r for r in self.rules if r.matches(path))
+    return None
 
 
 # =============================================================================
 # 3. SHELL (Entry Point)
 # =============================================================================
 
-# -- Hook Input Models (Discriminated Union) --
+# -- Cursor Hook Schema --
 
 
-class FileEditInput(BaseModel):
+class BaseHook(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal["file_edit"]
+    hook_event_name: str
+    workspace_roots: list[str] = []
+
+
+class FileEditHook(BaseHook):
+    hook_event_name: Literal["afterFileEdit"]
     file_path: Path
+    edits: list[Any] = []
 
 
-class StopInput(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal["stop"]
-    status: Literal["completed", "aborted", "error"]
+class StopHook(BaseHook):
+    hook_event_name: Literal["stop"]
+    status: str
 
 
-class EmptyInput(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal["empty"]
-
-
-# The Sum Type
-HookInputType = Annotated[
-    FileEditInput | StopInput | EmptyInput, Field(discriminator="kind")
+# Discriminated Union
+type HookInputType = Annotated[
+    FileEditInput | StopHook | BaseHook, Field(discriminator="hook_event_name")
 ]
 
 
 class HookInput(RootModel[HookInputType]):
-    """Parsed input from the hook (Polymorphic)."""
-
     root: HookInputType
 
 
-# -- Hook Output Models --
-
-
-class HookOutput(BaseModel):
-    """Base class for all hook outputs."""
-
-    model_config = {"frozen": True}
-
-
-class MessageOutput(HookOutput):
-    kind: Literal["message"] = "message"
-    agent_message: str
-
-
-class NoOutput(HookOutput):
-    kind: Literal["no_output"] = "no_output"
+# -- Internal Context --
 
 
 class EditInput(BaseModel):
-    """Internal model for the content to be edited."""
-
-    model_config = {"frozen": True}
     file_path: Path
     content: str
 
 
-def load_rules(rules_dir: Path) -> tuple[RuleRef, ...]:
-    """Load rules from disk."""
-    if not rules_dir.exists():
-        return ()
-
-    rules: list[RuleRef] = []
-    for d in rules_dir.iterdir():
-        if d.is_dir() and d.name.startswith("pattern-"):
-            rule_path = d / "RULE.md"
-            if rule_path.exists():
-                content = rule_path.read_text(encoding="utf-8")
-                # Parse globs (simple regex)
-                m = re.search(r"globs:\s*\[(.*?)\]", content)
-                globs: list[str] = []
-                if m:
-                    globs = [
-                        g.strip().strip("'\"")
-                        for g in m.group(1).split(",")
-                        if g.strip()
-                    ]
-
-                # Parse ID
-                pid = re.match(r"pattern-(\d+)", d.name)
-                # Map regex match to Enum if possible, else default
-                pid_str = pid.group(1) if pid else "00"
-                # Simple lookup or default
-                try:
-                    pattern_id = PatternId(pid_str)
-                except ValueError:
-                    pattern_id = PatternId.P00_MASTER
-
-                rules.append(
-                    RuleRef(pattern_id=pattern_id, name=d.name, globs=tuple(globs))
-                )
-    return tuple(rules)
-
-
-def parse_cli_args(args: list[str]) -> EditInput | None:
-    """Parse CLI arguments."""
+def parse_input(raw: str) -> HookInputType | None:
     try:
-        path = Path(args[1])
-        content = path.read_text(encoding="utf-8")
-        return EditInput(file_path=path, content=content)
-    except Exception as e:
-        print(f"Error reading file: {e}")
-        return None
-
-
-def parse_stdin(stdin: TextIO) -> EditInput | None:
-    """Parse stdin as HookInput JSON."""
-    if stdin.isatty():
-        return None
-    raw = stdin.read()
-    if not raw:
-        return None
-
-    try:
-        # Parse Don't Validate (Polymorphic)
-        hook_input = HookInput.model_validate_json(raw)
-
-        match hook_input.root:
-            case FileEditInput(file_path=fp):
-                content = fp.read_text(encoding="utf-8")
-                return EditInput(file_path=fp, content=content)
-            case StopInput() | EmptyInput():
-                print(NoOutput().model_dump_json())
-                return None
-
-            # Exhaustiveness: Pyright might complain if we miss a case or if it can't infer union.
-            # But with RootModel[Union], it should be safe.
-            # Removing `case _` to prove exhaustiveness.
+        return HookInput.model_validate_json(raw).root
     except (ValidationError, json.JSONDecodeError):
-        # Structural failure of hook input -> No Output
         return None
 
-    return None
+
+def write_feedback(file_path: Path, signals: list[Signal]) -> None:
+    """Side Effect: Write violations to the feedback file."""
+    # Find the .cursor/mirror-feedback.md file relative to repo root
+    # Assumption: script is in .cursor/hooks/mirror.py
+    # So .cursor/ is parent.
+    cursor_dir = Path(__file__).parent.parent
+    feedback_file = cursor_dir / "mirror-feedback.md"
+
+    if not signals:
+        if feedback_file.exists():
+            feedback_file.write_text("", encoding="utf-8")
+        return
+
+    output_lines = [f"## Architect's Mirror: {file_path.name}\n"]
+    output_lines.append("### Signals Detected\n")
+    for sig in signals:
+        output_lines.append(f"- **Line {sig.line}** [{sig.kind}]: `{sig.content}`")
+        output_lines.append(f"  - Hint: {sig.hint}")
+        output_lines.append(f"  - Pattern: {sig.pattern_id}\n")
+
+    feedback_file.write_text("\n".join(output_lines), encoding="utf-8")
 
 
 def main() -> None:
-    # 1. Parse Input (Strategy Selection)
     cli_mode = len(sys.argv) > 1
     edit_input: EditInput | None = None
 
+    # 1. Parse Input
     if cli_mode:
-        edit_input = parse_cli_args(sys.argv)
+        # CLI Mode: python mirror.py <file>
+        try:
+            path = Path(sys.argv[1])
+            content = path.read_text(encoding="utf-8")
+            edit_input = EditInput(file_path=path, content=content)
+        except Exception:
+            return
     else:
-        edit_input = parse_stdin(sys.stdin)
+        # Hook Mode: stdin
+        if sys.stdin.isatty():
+            return
+        raw = sys.stdin.read()
+        if not raw:
+            return
+
+        hook_input = parse_input(raw)
+        if not hook_input:
+            return
+
+        if isinstance(hook_input, FileEditInput):
+            # Read file from disk (Cursor may have updated it)
+            try:
+                content = hook_input.file_path.read_text(encoding="utf-8")
+                edit_input = EditInput(file_path=hook_input.file_path, content=content)
+            except Exception:
+                return
+        elif isinstance(hook_input, StopHook):
+            # Clear feedback on stop
+            write_feedback(Path("stop"), [])
+            return
+        else:
+            return
 
     if not edit_input:
         return
 
-    # 2. Wire Service
-    repo_root = Path(__file__).parent.parent.parent
-    rules_dir = repo_root / ".cursor" / "rules"
-    rules = load_rules(rules_dir)
-    scanner = FileScanner(rules)
-
-    # 3. Execute
-    signals = scanner.scan_file(edit_input.file_path, edit_input.content)
-    applicable = scanner.get_applicable_rules(edit_input.file_path)
-
-    if not signals and not applicable:
-        if cli_mode:
-            print("✅ No signals.")
-        else:
-            print(NoOutput().model_dump_json())
+    # 2. Execute Logic
+    try:
+        tree = ast.parse(edit_input.content)
+    except SyntaxError:
         return
 
-    # 4. Format Output
-    output_lines = [f"## Architect's Mirror: {edit_input.file_path.name}\n"]
+    lines = edit_input.content.splitlines()
 
-    if signals:
-        output_lines.append("### Signals Detected\n")
-        for sig in signals:
-            output_lines.append(f"- **Line {sig.line}** [{sig.kind}]: `{sig.content}`")
-            output_lines.append(f"  - Hint: {sig.hint}")
-            output_lines.append(f"  - Pattern: {sig.pattern_id}\n")
+    def get_line(n: int) -> str:
+        if 1 <= n <= len(lines):
+            return lines[n - 1].strip()
+        return ""
 
-    if applicable:
-        output_lines.append("\n### Applicable Patterns\n")
-        for r in applicable:
-            output_lines.append(f"- {r.name} (ID: {r.pattern_id})")
+    signals: list[Signal] = []
+    for node in ast.walk(tree):
+        sig = detect_signal(node, edit_input.file_path, get_line)
+        if sig:
+            signals.append(sig)
 
-    msg = "\n".join(output_lines)
-
-    if cli_mode:
-        print(msg)
+    # 3. Output (Side Effect)
+    if not cli_mode:
+        write_feedback(edit_input.file_path, signals)
     else:
-        print(MessageOutput(agent_message=msg).model_dump_json())
+        # CLI Output to stdout
+        if not signals:
+            print("✅ No signals.")
+        else:
+            for sig in signals:
+                print(f"[Line {sig.line}] {sig.kind}: {sig.hint}")
 
 
 if __name__ == "__main__":

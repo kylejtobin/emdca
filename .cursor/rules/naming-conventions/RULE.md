@@ -21,7 +21,8 @@ domain/
       ├── model.py    # ❌ Generic. Every file is a model?
       ├── logic.py    # ❌ Generic. What kind of logic?
       ├── utils.py    # ❌ The Junk Drawer.
-      └── helpers.py  # ❌ The other Junk Drawer.
+      ├── helpers.py  # ❌ The other Junk Drawer.
+      └── intent.py   # ❌ Generic Pattern Name.
 ```
 
 ---
@@ -35,7 +36,8 @@ domain/
   └── order/
       ├── order.py         # ✅ The Aggregate Root
       ├── fulfillment.py   # ✅ Specific Workflow
-      └── pricing.py       # ✅ Specific Logic
+      ├── pricing.py       # ✅ Specific Logic
+      └── contract.py      # ✅ Data Contracts (Intents/Results)
 ```
 
 ---
@@ -62,7 +64,7 @@ Some files define the **Boundary itself**, so the technical name is the concept.
 |----------|-----------|
 | **`domain/context/concept.py`** | `domain/context/model.py` |
 | **`domain/context/workflow.py`** | `domain/context/process.py` (Too vague) |
+| **`domain/context/contract.py`** | `domain/context/intent.py` |
 | **`service/specific_service.py`** | `service/service.py` |
 | **`shared/money.py`** | `shared/utils.py` |
 | **Rename `helpers.py` to `[concept].py`** | `helpers.py` |
-

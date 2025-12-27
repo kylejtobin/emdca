@@ -7,45 +7,52 @@
 
 **A rigorous architectural standard for building correct-by-construction, AI-native software systems.**
 
-EMDCA eliminates "conceptual fragmentation" by enforcing strict co-location of logic and data, utilizing algebraic data types, and separating decision-making (Functional Core) from execution (Imperative Shell).
+EMDCA eliminates "conceptual fragmentation" by enforcing strict co-location of **Logic, Data, and Capability** within the Domain Model.
 
 ---
 
-## 🎯 Why EMDCA?
+## 🎯 The Core Philosophy: The Thing IS The Thing
 
-Software systems fail from **scattered truth**. The rules governing an "Order" are often distributed across services, validators, and database constraints. EMDCA fixes this by making the Type System the engine of the application.
+Software often separates the "Definition" of an entity (Model) from the "Action" of that entity (Service). This creates a "Passive Domain" that cannot protect itself or act on the world.
 
-1.  **Behavioral Types (Smart Enums):** Enums are not just labels; they are **State Engines**. They know their legal transitions and properties. The Type System defines the workflow graph, driving automation naturally.
-2.  **Co-location of Logic:** The Pydantic Model answers the question, not an external service. Logic lives with Data.
-3.  **Correctness by Construction:** Invalid states are unrepresentable. Validation happens once, at the boundary.
-4.  **Explicit Context:** No magic globals. No hidden I/O. Dependencies are explicit; Time is data.
+**EMDCA inverts this.**
+The Domain Model is **Active**. It owns its data, its rules, and its ability to act. The Service Layer exists only to **provision** the Domain with the tools (Capabilities) it needs.
+
+### What This IS:
+*   **Active Models:** `EventStore` holds `NatsClient` and calls `publish()`. `Order` holds `PricingPolicy` and calls `calculate()`.
+*   **Injection:** Capabilities (Tools) are passed into Models at construction.
+*   **Co-location:** If a concept "Stores Events," the logic for storing events lives on the concept's Model.
+
+### What This IS NOT:
+*   **Anemic Models:** Passive DTOs that are manipulated by "Manager" classes.
+*   **Magic Globals:** Hidden dependencies pulled from the air. Dependencies are explicit arguments.
+*   **Abstract Interfaces:** We do not mock `IEventBus`. We inject the real `EventCapability` (Model).
 
 ---
 
 ## ⚖️ The 10 Mandates
 
-1.  **Construction:** Parse, don't validate. Factory methods on frozen Pydantic models.
-2.  **State:** Sum Types (Discriminated Unions). **Smart Enums drive the lifecycle.** Make invalid states unrepresentable.
-3.  **Control Flow:** Railway Oriented Logic. Structural failures crash; Business failures return Results.
-4.  **Execution:** Intents as Contracts. The Domain decides; the Service executes.
-5.  **Configuration:** EnvVars as Foreign Reality. Pydantic Settings as Domain Schema.
-6.  **Storage:** DB as Foreign Reality. Stores are **Service Classes** (Executors) that run Load Intents.
-7.  **Translation:** Foreign Models with `.to_domain()`. Explicit boundaries.
-8.  **Coordination:** Orchestrators are **Service Classes** (Runtimes) that drive the loop.
-9.  **Workflow:** Process as State Machine. Transitions are Pure Functions.
-10. **Infrastructure:** Capability as Data. Model the configuration, not the interface.
+1.  **Construction:** **Correctness by Construction.** Invalid input causes a Crash (`ValidationError`), not a logic branch.
+2.  **State:** **Behavioral Types (Smart Enums).** The Enum defines the lifecycle graph; the Model holds the state.
+3.  **Control Flow:** **Railway Logic.** Structural failures (Input) Crash; Business failures (Logic) return Results.
+4.  **Execution:** **Active Capability.** The Domain Model holds the capability to execute its intent.
+5.  **Configuration:** **Schema as Domain.** `AppConfig(BaseSettings)` is the Domain's definition of the environment.
+6.  **Storage:** **Store as Model.** An `EventStore` is a Domain Model that encapsulates the DB Client and Logic.
+7.  **Translation:** **Explicit Boundary.** Foreign Models parse raw data; Domain Models own the translation logic.
+8.  **Coordination:** **Runtime as Model.** The Orchestrator is a Domain Model that drives the state machine loop.
+9.  **Workflow:** **State Machine.** Transitions are pure functions on the Model; Side Effects are capabilities invoked by the Model.
+10. **Infrastructure:** **Capability Injection.** Infrastructure is passed to the Domain as a Tool (Client), not hidden behind an Interface.
 
-**→ Read the [Architecture Spec](ref/arch.md) for the principles, then the [Patterns](ref/patterns/) for implementation.**
+**→ Read the [Architecture Spec](ref/arch.md) for the detailed laws.**
 
 ---
 
 ## 🧱 Building Blocks
 
-*   **Smart Enums:** `StrEnum` with methods. The "Brain" of the state machine.
-*   **Domain Models:** Frozen Pydantic models with **Business Logic**. The "Smart Core."
-*   **Service Classes:** Plain Python classes with **Wiring Logic**. The "Dumb Shell."
-*   **Intents & Results:** Data packets that cross the boundary.
-*   **Foreign Models:** Mirrors of external APIs/DBs.
+*   **Smart Enums:** The "Brain." Defines the rules of the state graph.
+*   **Domain Models:** The "Body." Holds Data + Logic + Capabilities.
+*   **Capabilities:** The "Hands." Injected tools (Clients) that allow the Model to affect the world.
+*   **Service Layer:** The "Factory Floor." Wires Capabilities into Models and starts the process.
 
 ---
 
@@ -54,7 +61,7 @@ Software systems fail from **scattered truth**. The rules governing an "Order" a
 The `.cursor/` directory implements active enforcement for AI agents working in this codebase.
 
 *   **Rules:** `pattern-*/RULE.md` define the laws.
-*   **Mirror:** `hooks/mirror.py` runs AST analysis to detect violations (e.g., `try/except` in Domain).
+*   **Mirror:** `hooks/mirror.py` runs AST analysis to detect violations (e.g., Passive Models in Service).
 *   **Feedback:** The system writes violations to `mirror-feedback.md` automatically.
 
 **→ Read [Cursor Agent Architecture](ref/cursor_arch.md) for details on the enforcement system.**
@@ -75,9 +82,10 @@ The `.cursor/` directory implements active enforcement for AI agents working in 
 
 ## 🚀 Getting Started
 
-1.  **Read** the [Architecture Spec](ref/arch.md) to understand the "Physics" of the system.
-2.  **Study** the [Patterns](ref/patterns/) to see the "Mechanisms" in action.
-3.  **Build** your Domain Models first. Define the Types, then the Logic, then the Shell.
+1.  **Define the Capability:** What tool does the domain need? (e.g. `NatsClient`).
+2.  **Define the Model:** Create a Pydantic Model that holds the Data and the Capability.
+3.  **Define the Logic:** Write methods on the Model that use the Capability.
+4.  **Wire the Service:** In `main.py`, create the Client and inject it into the Model.
 
 **For AI Agents:** This repo is designed for you. The `.cursor/rules/` prime your context. The constraints act as guardrails—hallucinations become compilation errors.
 

@@ -9,36 +9,37 @@ alwaysApply: false
 ## Valid Code Structure
 
 ```python
-# DOMAIN: Configuration (Data), not Behavior (Methods)
-class EventCapability(BaseModel):
-    """Abstract capability: I need a topic with these params."""
-    model_config = {"frozen": True}
+# DOMAIN: Active Capability Model (Holds Client)
+class EventStore(BaseModel):
+    """
+    Active Domain Model.
+    Encapsulates the Infrastructure Client and Logic.
+    """
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    
+    # Configuration
     topic_name: TopicName
-    retention_days: PositiveInt
-
-# DOMAIN: Intent (Data)
-class StoreEventIntent(BaseModel):
-    """I want to store this."""
-    model_config = {"frozen": True}
-    kind: Literal[EventIntentKind.STORE]
-    event_data: EventPayload
-
-# SERVICE: Executor (Service Class)
-class EventExecutor:
-    """Binds Capability (Config) to Technology."""
     
-    def __init__(self, capability: EventCapability, client: NatsClient):
-        self.capability = capability
-        self.client = client
-    
-    async def execute(self, intent: StoreEventIntent) -> EventResult:
-        # Use Config to direct the Action
-        topic = self.capability.topic_name
+    # Injected Tool (Client)
+    client: NatsClient
+
+    async def publish(self, event: DomainEvent) -> EventResult:
+        """
+        The Domain Model executes the capability.
+        "The thing is the thing."
+        """
+        # Direct Execution (No defensive try/catch for structural failure)
+        # If NATS is down, let it crash or handle at higher level.
+        # If we need Railway result for "Network Error", we handle it here.
         
         try:
-            await self.client.publish(topic, intent.event_data)
+            await self.client.publish(
+                self.topic_name, 
+                event.model_dump_json()
+            )
             return EventStored(kind=EventResultKind.STORED)
         except NatsError:
+            # Expected Business Failure (Network) -> Result
             return EventFailed(kind=EventResultKind.FAILED)
 ```
 
@@ -46,10 +47,10 @@ class EventExecutor:
 
 | Required | Forbidden |
 |----------|-----------|
-| Domain declares **Configuration Data** | `import boto3` / `import nats` in domain |
+| **Capability is an Injected Model** | **Capability is an Interface/Protocol** |
+| **Model holds the Client** | **Model holds only Config (Passive)** |
+| **Model executes Logic** | **Service executes Logic (Anemic)** |
+| **Direct Construction/Casting** | **Manual Mapper Functions** |
 | Failure modes as abstract `StrEnum` | Technology-specific configs in domain |
-| Service layer owns tech configs | `NatsStreamConfig` in `domain/` |
-| **Service executes Intents** | **Service implements Interfaces** |
 | All fields explicit, no defaults | Side effects on model init |
-| **Capabilities are Data (Specs)** | **Capabilities are Interfaces (Methods)** |
-| **Executor is a Service Class** | **Executor is a Pydantic Model** |
+| **Real Clients (or Test Doubles)** | **Mocks** |

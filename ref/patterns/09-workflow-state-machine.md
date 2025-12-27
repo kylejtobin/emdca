@@ -7,7 +7,7 @@ Complex business processes are State Machines. We model them as explicit state t
 1.  **States:** Sum Types representing every step, discriminated by a **Smart Enum**.
 2.  **Events:** Sum Types representing what happened.
 3.  **Transition:** A pure function `step(state, event)` returning the next state and side effects (Intents).
-4.  **Runtime:** A generic driver (Service Class) that loads state, calls transition, saves state, and returns output.
+4.  **Runtime:** An **Active Domain Model** that loads state, calls transition, saves state, and returns output.
 
 ---
 
@@ -74,20 +74,21 @@ type SignupState = Annotated[
 
 ---
 
-## 3. The Runtime (Service Layer)
-The runtime manages the persistence lifecycle. It is a **Service Class**.
+## 3. The Runtime (Active Model)
+The runtime manages the persistence lifecycle. It is a **Smart Domain Model** holding the Store Capability.
 
-### ✅ Pattern: The Generic Loop
+### ✅ Pattern: The Active Loop
 ```python
-class WorkflowRuntime:
-    """Service Class: Driver for the State Machine."""
+class WorkflowRuntime(BaseModel):
+    """Active Domain Model. Drives the State Machine."""
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
     
-    def __init__(self, executor: WorkflowExecutor):
-        self.executor = executor
+    # Injected Capability
+    store: WorkflowStore
     
     async def run_step(self, id: WorkflowId, event: WorkflowEvent) -> RunResult:
         # 1. Load (Generic I/O)
-        state = await self.executor.load(id)
+        state = await self.store.load(id)
         if not state:
             return WorkflowNotFound(id=id)
         
@@ -96,10 +97,9 @@ class WorkflowRuntime:
         new_state, intent = state.handle(event)
         
         # 3. Save (Generic I/O)
-        await self.executor.save(id, new_state)
+        await self.store.save(id, new_state)
         
         # 4. Return Intent for Execution
-        # (The runtime usually executes it, or returns it for the API to execute)
         return RunResult(kind=RunKind.STEPPED, intent=intent)
 ```
 
@@ -110,5 +110,4 @@ class WorkflowRuntime:
 - [ ] **Smart Enums:** Are state kinds defined by `StrEnum`?
 - [ ] **Value Objects:** Are IDs and fields typed (`UserId`), not strings?
 - [ ] **Pure Transitions:** Do transitions return `(State, Intent)`, doing no I/O?
-- [ ] **Runtime is Class:** Is the runner a regular `class`, NOT a `BaseModel`?
-- [ ] **No Stores in Domain:** Does the Runtime handle I/O, not the Domain?
+- [ ] **Runtime is Model:** Is the runner a `BaseModel` holding the Store?

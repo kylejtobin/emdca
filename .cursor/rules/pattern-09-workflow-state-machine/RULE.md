@@ -47,20 +47,25 @@ type SignupState = Annotated[
     Field(discriminator="kind")
 ]
 
-# Workflow Runtime: Service Layer (Regular Class)
-class WorkflowRuntime:
-    def __init__(self, executor: WorkflowExecutor):
-        self.executor = executor
+# Workflow Runtime: Active Domain Model
+class WorkflowRuntime(BaseModel):
+    """
+    Active Domain Model. Drives the State Machine.
+    """
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    
+    # Injected Capability (Store)
+    store: WorkflowStore
     
     async def run_step(self, id: WorkflowId, event: WorkflowEvent) -> RunResult:
-        # 1. Generic Load (I/O)
-        state = await self.executor.load(id)
+        # 1. Load (Generic I/O via Capability)
+        state = await self.store.load(id)
         
-        # 2. Pure Transition (Domain)
+        # 2. Pure Transition (Domain Logic)
         new_state, intent = state.handle(event)
         
-        # 3. Generic Save (I/O)
-        await self.executor.save(id, new_state)
+        # 3. Save (Generic I/O via Capability)
+        await self.store.save(id, new_state)
         
         # 4. Return Intent for Execution
         return RunResult(kind="stepped", intent=intent)
@@ -75,5 +80,5 @@ class WorkflowRuntime:
 | **Typed IDs (WorkflowId)** | **Primitive IDs (str)** |
 | Transition methods on source state | Standalone `def verify_signup()` functions |
 | Returns `(NewState, Intent)` tuple | Side effects in transition |
-| **Runtime is a Service Class** | **Runtime is a Pydantic Model or Dataclass** |
+| **Runtime is a Domain Model** | **Runtime is a Service Class** |
 | Runtime delegates to `state.handle()` | Logic inside Runtime |

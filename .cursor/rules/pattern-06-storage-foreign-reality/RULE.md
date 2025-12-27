@@ -9,12 +9,10 @@ alwaysApply: false
 ## Valid Code Structure
 
 ```python
+# Smart Enum
 class StorageResultKind(StrEnum):
     FOUND = "found"
     NOT_FOUND = "not_found"
-
-class IntentKind(StrEnum):
-    LOAD_ORDER = "load_order"
 
 # Foreign Model: Represents the database row shape
 class DbOrder(BaseModel):
@@ -44,24 +42,29 @@ class OrderNotFound(BaseModel):
 
 type FetchOrderResult = OrderFound | OrderNotFound
 
-# Intent (Domain)
-class LoadOrderIntent(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal[IntentKind.LOAD_ORDER]
-    order_id: OrderId
-
-# Executor: Service Layer (Regular Class)
-class OrderExecutor:
-    def __init__(self, table_name: TableName):
-        self.table_name = table_name
+# The Store: Active Domain Model (Capability)
+class OrderStore(BaseModel):
+    """
+    Active Capability. Encapsulates the Database Client.
+    Lives in the Domain (Schema + Logic).
+    """
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
     
-    async def execute_load(self, intent: LoadOrderIntent, db: Any) -> FetchOrderResult:
-        # 1. I/O
-        row = await db.fetch_one(intent.order_id)
+    # Injected Tool (Client)
+    db: Any 
+    table_name: TableName
+    
+    async def load(self, order_id: OrderId) -> FetchOrderResult:
+        # The Domain Model executes the query via the Tool.
+        # "The thing is the thing."
+        row = await self.db.fetch_one(
+            select(self.table_name).where(id=order_id)
+        )
         
-        # 2. Translation
+        # Translation
         if not row:
-            return OrderNotFound(kind=StorageResultKind.NOT_FOUND, order_id=intent.order_id)
+            return OrderNotFound(kind=StorageResultKind.NOT_FOUND, order_id=order_id)
+            
         return OrderFound(
             kind=StorageResultKind.FOUND, 
             order=DbOrder.model_validate(row).to_domain()
@@ -74,9 +77,8 @@ class OrderExecutor:
 |----------|-----------|
 | `DbModel` with `.to_domain()` method | Repository pattern with abstract interface |
 | `Found \| NotFound` Sum Type | `return None` for not found |
-| **Store as Executor (Service Layer)** | **Store as Class in Domain** |
-| **Domain returns Intent to Load** | **Domain calls Store.fetch()** |
+| **Store is a Domain Model** | **Store is a Service Class** |
+| **Capability (DB) Injected into Store** | **Global DB Access** |
 | `DbOrder.model_validate(row).to_domain()` | Raw dict passing |
-| **Executor is a Regular Class** | **Executor is a Pydantic Model or Dataclass** |
 | **Typed IDs (OrderId)** | **String IDs (str)** |
 | **Smart Enums for Kinds** | **String Literals for Kinds** |

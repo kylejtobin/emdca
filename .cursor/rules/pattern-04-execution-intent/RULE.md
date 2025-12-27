@@ -1,97 +1,68 @@
 ---
-description: "Pattern 04: Execution — Intent as Contract. Domain decides, Shell executes, models parse."
-globs: ["**/domain/**/*.py", "**/service/**/*.py"]
+description: "Pattern 04: Execution — Active Capability. Domain Models execute actions via injected tools."
+globs: ["**/domain/**/*.py"]
 alwaysApply: false
 ---
 
-# Pattern 04: Execution Intent
+# Pattern 04: Execution (Active Capability)
 
 ## Valid Code Structure
 
 ```python
 # Smart Enums
-class IntentKind(StrEnum):
-    SEND_EMAIL = "send_email"
-    NO_OP = "no_op"
+class SignupResultKind(StrEnum):
+    SENT = "sent"
+    FAILED = "failed"
 
-class EmailResultKind(StrEnum):
-    SENT = "email_sent"
-    FAILED = "email_failed"
-    UNHANDLED = "email_unhandled"
-
-# Intent: Complete specification of what to do AND how to interpret results
-class SendEmailIntent(BaseModel):
+class SignupResult(BaseModel):
     model_config = {"frozen": True}
-    kind: Literal[IntentKind.SEND_EMAIL]  # NO DEFAULT
-    
-    to: Email
-    subject: EmailSubject
-    body: EmailBody
-    handled_failures: tuple[SmtpFailure, ...]  # NO DEFAULT
-    
-    def is_handled(self, failure: SmtpFailure) -> bool:
-        """Check if a failure type is in the handled set."""
-        return failure in self.handled_failures
-    
-    def on_sent(self, outcome: SmtpSent) -> EmailSent:
-        return EmailSent(kind=EmailResultKind.SENT, message_id=outcome.message_id, recipient=self.to)
-    
-    def on_failed(self, outcome: SmtpFailed) -> EmailFailed:
-        return EmailFailed(kind=EmailResultKind.FAILED, recipient=self.to, failure=outcome.failure)
+    kind: SignupResultKind
+    message_id: str | None = None
 
-# NoOp: Explicit "do nothing" decision
-class NoOp(BaseModel):
-    model_config = {"frozen": True}
-    kind: Literal[IntentKind.NO_OP]  # NO DEFAULT
-    reason: NoOpReason
+# The Capability (Tool)
+# Injected into the Domain. This is the "Hand" of the model.
+class EmailCapability(BaseModel):
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    
+    # Holds the actual client (e.g. SMTP connection)
+    client: Any 
 
-type SignupDecision = SendEmailIntent | NoOp
+    def send(self, to: Email, subject: str, body: str) -> EmailResult:
+        # Implementation of the side effect
+        # Returns Railway Result, catches Structural Failure inside if needed
+        return self.client.send(to, subject, body)
 
-# Aggregate returns Intent
+# The Domain Model (Active Agent)
 class User(BaseModel):
     model_config = {"frozen": True}
+    
     id: UserId
     email: Email
-    is_vip: bool
     
-    def decide_signup_action(self) -> SignupDecision:
-        if self.is_vip:
-            return SendEmailIntent(
-                kind=IntentKind.SEND_EMAIL,
-                to=self.email,
-                subject=EmailSubject.WELCOME_VIP,
-                body=EmailBody.VIP_TEMPLATE,
-                handled_failures=(SmtpFailure.CONNECTION_FAILED, SmtpFailure.TIMEOUT),
-            )
-        return NoOp(kind=IntentKind.NO_OP, reason=NoOpReason.NON_VIP)
+    # Injected Capability
+    emailer: EmailCapability
 
-# Executor: Service Layer (Regular Class - "Worker with Tools")
-class EmailExecutor:
-    def __init__(self, config: SmtpConfig):
-        self.config = config
-    
-    def execute(self, intent: SendEmailIntent, raw: RawSmtpResult) -> EmailResult:
-        # Pure Parsing logic (static or module-level)
-        outcome = SmtpParser.parse(raw)
+    def signup(self) -> SignupResult:
+        # The Domain decides AND executes
+        # "The thing is the thing" - The User signs up.
+        result = self.emailer.send(
+            to=self.email, 
+            subject="Welcome", 
+            body="..."
+        )
         
-        match outcome:
-            case SmtpClientSuccess(message_id=mid):
-                return intent.on_sent(SmtpSent(kind=InfraResultKind.SMTP_SENT, message_id=mid))
-            case SmtpClientError(failure=f) if intent.is_handled(f):
-                return intent.on_failed(SmtpFailed(kind=InfraResultKind.SMTP_FAILED, failure=f))
-            case SmtpClientError(failure=f):
-                return EmailUnhandled(kind=EmailResultKind.UNHANDLED, recipient=intent.to, failure=f)
+        if result.is_success:
+             return SignupResult(kind=SignupResultKind.SENT, message_id=result.message_id)
+        
+        return SignupResult(kind=SignupResultKind.FAILED)
 ```
 
 ## Constraints
 
 | Required | Forbidden |
 |----------|-----------|
-| Intent carries parameters + outcome mapping | Side effects in domain |
-| `on_success`/`on_failure` methods on Intent | `try/except` in executor |
-| `raw.to_foreign().to_domain()` chain | Exceptions for control flow |
-| **Smart Enums for Intent/Result Kinds** | **String Literals for Kinds** |
-| Infrastructure returns Sum Type | **Service/Client Object injection into domain/executor** |
-| `handled_failures` explicit | Default values on Intent fields |
-| **Executor is a Regular Class** | **Executor is a Pydantic Model or Dataclass** |
-| **Typed Fields (Email)** | **Stringly Typed Fields (str)** |
+| **Capability injected into Model** | **Service Class executing Intent** |
+| **Logic and Execution co-located** | Separation of "Decide" and "Do" |
+| **Active Domain Model** | **Passive DTO** |
+| **Smart Enums for Result Kinds** | **Magic Strings** |
+| Real Clients (or Test Clients) | Mocks of Interfaces |

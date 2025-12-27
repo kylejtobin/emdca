@@ -1,27 +1,30 @@
 # Pattern 06: Storage (Foreign Reality)
 
 ## The Principle
-The Database is just another External System. It is a **Foreign Reality** that must be explicitly modeled and translated, just like a 3rd-party API. The Domain does not define "Repositories"; it defines **Foreign Models** representing the stored data shape.
+The Database is just another External System. It is a **Foreign Reality** that must be explicitly modeled and translated.
+In EMDCA, the **Store** is not a "Repository Service"; it is a **Smart Domain Model** (Capability) that encapsulates the database connection and the logic to use it.
 
 ## The Mechanism
-1.  **Foreign Models (Schema):** The Domain defines `DbOrder` (Pydantic) representing the SQL table structure.
-2.  **Self-Translation:** `DbOrder` knows how to convert itself into `Order` (Internal Truth).
-3.  **Orchestrator Execution:** The Orchestrator executes the query, validates into `DbOrder`, and translates to `Order`.
+1.  **Foreign Models (Schema):** `DbOrder` defines the SQL shape.
+2.  **Capability (The Store):** `OrderStore` is a Domain Model that holds the DB Client.
+3.  **Active Execution:** `OrderStore.load()` uses the client to fetch data and translate it.
 
 ---
 
 ## 1. The Repository Abstraction (Anti-Pattern)
-Traditional "Repository Patterns" hide translation logic, coupling the Domain to an interface that mimics a collection.
+Traditional "Repository Patterns" hide translation logic behind interfaces, separating the "Definition" of storage from the "Act" of storage.
 
-### ❌ Anti-Pattern: The Magic Repo
+### ❌ Anti-Pattern: Service-Based Repository
 ```python
-order = repo.get(order_id)  # ❌ Hidden translation, hidden query
+# Service Class
+class OrderRepository:
+    def get(self, id): ... 
 ```
 
 ---
 
 ## 2. The Foreign Model (The Database Schema)
-We model the database row explicitly. This lives in the Domain because knowing the persistence shape is Domain Knowledge.
+We model the database row explicitly.
 
 ### ✅ Pattern: The DB Model
 ```python
@@ -71,26 +74,29 @@ type FetchOrderResult = OrderFound | OrderNotFound
 
 ---
 
-## 4. The Store Executor
+## 4. The Store Capability (Active Model)
 
-The "Store" is a Service Layer concept (Interpreter), not a Domain concept. It executes Load/Save Intents.
+The "Store" is an Active Domain Model. It holds the DB Client.
 
-### ✅ Pattern: Intent-Based Execution
+### ✅ Pattern: Active Store
 ```python
-# service/order.py (NOT domain)
-class OrderExecutor:
-    """Service Class: Wiring and Execution."""
-    def __init__(self, table_name: TableName):
-        self.table_name = table_name
+class OrderStore(BaseModel):
+    """Active Domain Model. Holds Data (Config) and Capability (Client)."""
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
     
-    async def execute_load(self, intent: LoadOrderIntent, db: AsyncSession) -> FetchOrderResult:
-        # 1. Raw I/O
-        result = await db.execute(select(self.table_name).where(id=intent.order_id))
-        row = result.first()
+    # Injected Capability
+    db: Any
+    table_name: TableName
+    
+    async def load(self, order_id: OrderId) -> FetchOrderResult:
+        # 1. Raw I/O (Using Injected Capability)
+        row = await self.db.fetch_one(
+            select(self.table_name).where(id=order_id)
+        )
         
         # 2. Pure Translation
         if not row:
-            return OrderNotFound(kind=StorageResultKind.NOT_FOUND, order_id=intent.order_id)
+            return OrderNotFound(kind=StorageResultKind.NOT_FOUND, order_id=order_id)
             
         return OrderFound(
             kind=StorageResultKind.FOUND, 
@@ -100,20 +106,21 @@ class OrderExecutor:
 
 ---
 
-## 5. The Orchestrator (Service Class)
+## 5. The Usage (Orchestration)
 
-The Orchestrator coordinates the flow: Intent -> Executor -> Result.
+The Orchestrator (Runtime) holds the Store Model.
 
-### ✅ Pattern: Reactive Data Flow
+### ✅ Pattern: Active Orchestration
 ```python
-class OrderProcessor:
-    """Service Class: Orchestration."""
-    def __init__(self, executor: OrderExecutor):
-        self.executor = executor
+class OrderRuntime(BaseModel):
+    """Active Runtime Model."""
+    model_config = {"frozen": True}
     
-    async def process(self, intent: LoadOrderIntent, db: AsyncSession) -> ProcessResult:
-        # 1. Execute Load Intent
-        fetch_result = await self.executor.execute_load(intent, db)
+    store: OrderStore
+    
+    async def process(self, order_id: OrderId) -> ProcessResult:
+        # The Store is Active. We just ask it to load.
+        fetch_result = await self.store.load(order_id)
         
         match fetch_result:
             case OrderFound(order=order):
@@ -124,19 +131,17 @@ class OrderProcessor:
 
 ---
 
-## 6. Why No Repository Class?
-By removing the Repository Class:
-1.  **Visible I/O:** You see exactly what query runs.
-2.  **Explicit Translation:** The `.to_domain()` proves boundary crossing.
-3.  **No Mocking:** Test Logic with `Order` objects directly.
+## 6. Why No Repository Interface?
+By making the Store a Model:
+1.  **Co-location:** The definition of "How to load an order" lives with the Order concept.
+2.  **Explicit Context:** The DB Client is passed in `__init__`.
+3.  **Unified Semantics:** Everything is a Model.
 
 ---
 
 ## Cognitive Checks
-- [ ] **Schema in Domain:** Does `domain/context/store.py` exist with Pydantic models?
-- [ ] **No SQL in Domain:** The Domain defines the shape, never imports `sqlalchemy`.
+- [ ] **Store is Model:** Is `OrderStore` a Pydantic Model?
+- [ ] **Capability Injected:** Does it hold `db` as a field?
+- [ ] **No Service Classes:** Did I remove `OrderRepository` class?
 - [ ] **Explicit Translation:** Does it read `DbOrder.model_validate(row).to_domain()`?
-- [ ] **No Implicit None:** Is "not found" an explicit `OrderNotFound` type?
-- [ ] **Store as Executor:** Is the store in `service/` not `domain/`?
-- [ ] **Domain is Passive:** Does the Domain describe data, not fetch it?
-- [ ] **Smart Enums:** Am I using `StorageResultKind` instead of literal "found"?
+- [ ] **Smart Enums:** Am I using `StorageResultKind`?
