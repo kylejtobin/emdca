@@ -61,7 +61,7 @@ The Domain Model is **Active**. It owns its data, its rules, and its ability to 
 The `.cursor/` directory implements active enforcement for AI agents working in this codebase.
 
 *   **Rules:** `pattern-*/RULE.md` define the laws.
-*   **Mirror:** `hooks/mirror.py` runs AST analysis to detect violations (e.g., Passive Models in Service).
+*   **Mirror:** `hooks/mirror.py` runs AST analysis to detect structural violations (Identity: Service/Domain class types; Flow: try/except/raise/await in Domain; Naming: validate_ functions).
 *   **Feedback:** The system writes violations to `mirror-feedback.md` automatically.
 
 **→ Read [Cursor Agent Architecture](ref/cursor_arch.md) for details on the enforcement system.**

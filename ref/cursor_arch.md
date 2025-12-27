@@ -42,13 +42,19 @@ Each architectural pattern has a corresponding rule file (`RULE.md`).
 
 ### 2. The Mirror (Active Verification)
 `hooks/mirror.py` is a Python script that parses the Abstract Syntax Tree (AST) of the codebase.
-*   **Role:** Deterministic enforcement of non-negotiable rules.
+*   **Role:** Micro-Linter / Agent Context Primer. Provides high-signal, low-noise architectural feedback.
 *   **Capabilities:**
-    *   Detects `try/except` blocks (banned in Domain).
-    *   Detects `raise` statements (banned in Domain).
-    *   Detects `datetime.now()` calls (banned in Domain; must inject).
-    *   Detects `BaseModel` inheritance in Service directories (Identity Violation).
-*   **Output:** Writes plain English signals to `mirror-feedback.md` or stdout.
+    *   **Identity Checks:**
+        *   Detects `BaseModel` inheritance in Service directories (Service classes must be plain classes).
+        *   Detects non-Model classes in Domain directories (Domain objects must be Pydantic Models or Enums).
+        *   Detects Service/Manager/Handler/Processor classes in Domain (wrong layer).
+    *   **Flow Checks:**
+        *   Detects `try/except` blocks in Domain (banned; use Result Types or Let It Crash).
+        *   Detects `raise` statements in Domain (banned; return Failure Results).
+        *   Detects `await` expressions in Domain (banned; async/IO belongs in Shell).
+    *   **Naming Smells:**
+        *   Detects `validate_*`, `check_*`, `verify_*` functions (banned; use Parse-Don't-Validate via Types).
+*   **Output:** Writes plain English signals to `mirror-feedback.md` (hook mode) or stdout (CLI mode).
 
 ### 3. Hooks (Automation)
 `hooks.json` binds the Mirror to IDE events.
@@ -90,4 +96,6 @@ AI Agents struggle with abstract constraints. They excel at fixing concrete erro
 *   **Mirror Signal:** "Line 42: Found `try/except` block in `domain/`. Remove it."
 
 This allows the Agent to **self-correct** without human intervention.
+
+**Micro-Linter Focus:** The Mirror is intentionally simplified to detect only the most critical structural violations. It acts as an "Agent Context Primer" rather than a comprehensive linter, providing high-signal feedback that guides the Agent toward architectural purity without overwhelming it with noise.
 

@@ -2,16 +2,8 @@
 The Architect's Mirror
 ======================
 
-A self-correcting feedback loop for EMDCA compliance.
-
-Architecture:
-    1. DOMAIN: Pure AST analysis logic (SignalDetector).
-    2. SERVICE: Orchestration of file reading and rule loading (MirrorExecutor).
-    3. SHELL: CLI/Hook entry point.
-
-Constraints:
-    - Pure Logic: AST traversal and signal generation.
-    - Impure Shell: File I/O, System Exit.
+A simple AST scanner to detect EMDCA violations.
+It emits signals; the Agent (LLM) decides the verdict.
 """
 
 from __future__ import annotations
@@ -175,31 +167,41 @@ def detect_signal(
 # -- Cursor Hook Schema --
 
 
-class BaseHook(BaseModel):
+class FileEditHook(BaseModel):
     model_config = {"frozen": True}
-    hook_event_name: str
-    workspace_roots: list[str] = []
-
-
-class FileEditHook(BaseHook):
     hook_event_name: Literal["afterFileEdit"]
+    workspace_roots: list[str] = []
     file_path: Path
-    edits: list[Any] = []
+    edits: list[dict[str, Any]] = []
 
 
-class StopHook(BaseHook):
+class StopHook(BaseModel):
+    model_config = {"frozen": True}
     hook_event_name: Literal["stop"]
+    workspace_roots: list[str] = []
     status: str
 
 
-# Discriminated Union
-type HookInputType = Annotated[
-    FileEditInput | StopHook | BaseHook, Field(discriminator="hook_event_name")
+# Discriminated Union for Input (Only exact matches)
+type CursorHookType = Annotated[
+    FileEditHook | StopHook, Field(discriminator="hook_event_name")
 ]
 
 
-class HookInput(RootModel[HookInputType]):
-    root: HookInputType
+class CursorHookInput(RootModel[CursorHookType]):
+    root: CursorHookType
+
+
+# Output Schemas
+class MessageOutput(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["message"] = "message"
+    agent_message: str
+
+
+class NoOutput(BaseModel):
+    model_config = {"frozen": True}
+    kind: Literal["no_output"] = "no_output"
 
 
 # -- Internal Context --
@@ -210,24 +212,21 @@ class EditInput(BaseModel):
     content: str
 
 
-def parse_input(raw: str) -> HookInputType | None:
+def parse_input(raw: str) -> CursorHookType | None:
     try:
-        return HookInput.model_validate_json(raw).root
+        return CursorHookInput.model_validate_json(raw).root
     except (ValidationError, json.JSONDecodeError):
         return None
 
 
 def write_feedback(file_path: Path, signals: list[Signal]) -> None:
     """Side Effect: Write violations to the feedback file."""
-    # Find the .cursor/mirror-feedback.md file relative to repo root
-    # Assumption: script is in .cursor/hooks/mirror.py
-    # So .cursor/ is parent.
-    cursor_dir = Path(__file__).parent.parent
-    feedback_file = cursor_dir / "mirror-feedback.md"
+    # Assume .cursor/ is relative to script location
+    path = Path(__file__).parent.parent / "mirror-feedback.md"
 
     if not signals:
-        if feedback_file.exists():
-            feedback_file.write_text("", encoding="utf-8")
+        if path.exists():
+            path.write_text("", encoding="utf-8")
         return
 
     output_lines = [f"## Architect's Mirror: {file_path.name}\n"]
@@ -237,7 +236,7 @@ def write_feedback(file_path: Path, signals: list[Signal]) -> None:
         output_lines.append(f"  - Hint: {sig.hint}")
         output_lines.append(f"  - Pattern: {sig.pattern_id}\n")
 
-    feedback_file.write_text("\n".join(output_lines), encoding="utf-8")
+    path.write_text("\n".join(output_lines), encoding="utf-8")
 
 
 def main() -> None:
@@ -265,18 +264,16 @@ def main() -> None:
         if not hook_input:
             return
 
-        if isinstance(hook_input, FileEditInput):
+        if isinstance(hook_input, FileEditHook):
             # Read file from disk (Cursor may have updated it)
             try:
                 content = hook_input.file_path.read_text(encoding="utf-8")
                 edit_input = EditInput(file_path=hook_input.file_path, content=content)
             except Exception:
                 return
-        elif isinstance(hook_input, StopHook):
-            # Clear feedback on stop
-            write_feedback(Path("stop"), [])
-            return
         else:
+            # StopHook: Clear feedback on stop
+            write_feedback(Path("stop"), [])
             return
 
     if not edit_input:
