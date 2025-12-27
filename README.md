@@ -45,6 +45,42 @@ It's simple. It's so obvious it sounds naive. But it is also profound. Sadly, to
 
 They're not.
 
+Your program is three directories and an entry point.
+
+```
+src/
+├── main.py              # Composition root: load config, wire, run
+├── api/                 # HTTP translation layer
+│   ├── app.py           # FastAPI instance
+│   └── {context}.py     # Routes per context
+├── domain/              # The system
+│   ├── {context}/       # Vertical slice per business concept
+│   │   ├── entity.py    # Active models (data + logic + capabilities)
+│   │   ├── store.py     # Active storage capability
+│   │   ├── workflow.py  # State machine + runtime
+│   │   ├── api.py       # Foreign model: our HTTP contract
+│   │   ├── vendor.py    # Foreign model: external APIs
+│   │   └── db.py        # Foreign model: database schema
+│   ├── shared/          # Cross-context primitives
+│   └── system/          # Config (BaseSettings)
+└── service/             # Wiring only
+    └── {context}.py     # Instantiate clients, inject into models
+```
+
+That's it.
+
+**`domain/`** is 90% of your code. It's where the system lives.
+
+**`service/`** is almost nothing. Create client. Pass to model. Done.
+
+**`api/`** is translation. Foreign model in, domain call, result out.
+
+**`main.py`** is ten lines. Load config. Wire services. Run app.
+
+No `utils/`. No `helpers/`. No `common/`. No `lib/`. No `core/`. No `managers/`. No `handlers/`. No `processors/`.
+
+If you can't place a file in one of these four places, the file shouldn't exist.
+
 Software often separates the "Definition" of an entity (Model) from the "Action" of that entity (Service). This creates a "Passive Domain" that cannot protect itself or act on the world.
 
 **EMDCA inverts this.**
