@@ -16,17 +16,17 @@ Example Implementation:
 class ConversationService:
     def __init__(self, config: AppConfig):
         self.config = config
-        
+
     def create_runtime(self) -> ConversationRuntime:
         # 1. Create Clients
         db = DatabaseClient(self.config.db_url)
-        
+
         # 2. Create Active Store
         store = ConversationStore(
-            table_name=self.config.table_name, 
+            table_name=self.config.table_name,
             db=db
         )
-        
+
         # 3. Create Active Runtime
         return ConversationRuntime(store=store)
 ```

@@ -24,9 +24,9 @@ class ActiveConversation(BaseModel):
 # The Active Runtime
 class ConversationRuntime(BaseModel):
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
-    
+
     store: ConversationStore
-    
+
     async def run(self, id: ConversationId, event: Event) -> Result:
         state = await self.store.load(id)
         new_state, intent = state.handle(event)

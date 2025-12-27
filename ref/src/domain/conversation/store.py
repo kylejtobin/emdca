@@ -15,12 +15,12 @@ Example Implementation:
 ```python
 class ConversationStore(BaseModel):
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
-    
+
     # Configuration
     table_name: TableName
-    
+
     # Injected Capability
-    db: DatabaseClient 
+    db: DatabaseClient
 
     async def load(self, id: ConversationId) -> Conversation:
         # Use client to fetch foreign model
@@ -31,4 +31,3 @@ class ConversationStore(BaseModel):
         return DbConversation.model_validate(row).to_domain()
 ```
 """
-
