@@ -35,5 +35,13 @@ jobs:
         run: uv run mypy .
 
       - name: Run Tests (Pytest)
-        run: uv run pytest
-
+        # Exit code 5 means no tests collected, which is valid for reference repos
+        run: |
+          uv run pytest
+          exit_code=$?
+          if [ $exit_code -eq 5 ]; then
+            echo "No tests collected (exit code 5) - this is valid for reference repos"
+            exit 0
+          else
+            exit $exit_code
+          fi
