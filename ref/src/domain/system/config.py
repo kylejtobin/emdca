@@ -18,7 +18,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", frozen=True)
-    
+
     database_url: PostgresDsn = Field(alias="DATABASE_URL")
     api_key: ApiKey = Field(alias="STRIPE_API_KEY")
 ```

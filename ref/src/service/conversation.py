@@ -1,25 +1,33 @@
 """
-THE IMPERATIVE SHELL (Executors & Runtimes)
+THE IMPERATIVE SHELL (Wiring & Provisioning)
 
-Role: Wiring, I/O, and Orchestration.
-Mandate: Mandate VIII (Coordination) & VI (Storage) & X (Infrastructure).
-Pattern: ref/patterns/08-orchestrator-loop.md
-Pattern: ref/patterns/06-storage-foreign-reality.md
+Role: Instantiates Clients and wires them into Domain Models.
+Mandate: Mandate VIII (Coordination) & X (Infrastructure).
+Pattern: ref/patterns/00-master-architecture.md
 
 Constraint:
-- Regular Python Classes (Not Pydantic Models).
+- Regular Python Classes (or just functions).
 - Dependencies injected via `__init__`.
-- No Business Logic (delegates to Domain).
+- Creates Clients (NATS, DB).
+- Does NOT contain business logic.
 
 Example Implementation:
 ```python
-class ConversationExecutor:
-    def __init__(self, dsn: PostgresDsn, api_key: ApiKey): ...
-    def load(self, id: ConversationId) -> Conversation: ...
-    def save(self, conversation: Conversation): ...
-
-class ConversationRuntime:
-    def __init__(self, executor: ConversationExecutor): ...
-    def run(self, intent: StartConversation) -> Result: ...
+class ConversationService:
+    def __init__(self, config: AppConfig):
+        self.config = config
+        
+    def create_runtime(self) -> ConversationRuntime:
+        # 1. Create Clients
+        db = DatabaseClient(self.config.db_url)
+        
+        # 2. Create Active Store
+        store = ConversationStore(
+            table_name=self.config.table_name, 
+            db=db
+        )
+        
+        # 3. Create Active Runtime
+        return ConversationRuntime(store=store)
 ```
 """

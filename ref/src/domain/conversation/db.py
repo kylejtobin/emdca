@@ -16,7 +16,7 @@ class DbConversation(BaseModel):
     model_config = {"frozen": True}
     id: ConversationId
     status: ConversationStatus
-    
+
     def to_domain(self) -> Conversation:
         return Conversation(...)
 ```
